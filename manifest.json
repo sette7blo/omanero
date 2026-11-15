@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "sette7blo",
   "license": "MIT",
-  "description": "A small hot Monero wallet in the Omarchy bar: create or restore from a seed, send and receive through a remote node, and tip Monero addresses you come across on X.",
+  "description": "A small hot Monero wallet in the Omarchy bar: create or restore from a seed, send and receive through a remote node, tip Monero addresses on X, and tip plugin authors who publish an address.",
   "homepage": "https://github.com/sette7blo/omanero",
   "funding": { "monero": "42iX2Knyef7Wi4rZxcWMw84DY7x1HUk67LKCqiqB1r5eLicJFvGbpCzUSiAqV8rGzbPW6yzmSGE93ZikU3PUkwnvQopggMB" },
   "kinds": [
@@ -19,7 +19,7 @@
   },
   "barWidget": {
     "displayName": "Monero",
-    "description": "A light Monero wallet with a panel to send, receive and pay monero: links. No local node.",
+    "description": "Send, receive, and tip Monero addresses from X and from other plugins. No local node.",
     "category": "Finance",
     "aliases": [
       "omanero",

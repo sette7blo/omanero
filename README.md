@@ -1,8 +1,9 @@
 # omanero
 
 Omarchy plugin: a small hot Monero wallet in the bar. Create a wallet or
-restore one from its seed, send and receive, and tip the Monero addresses you
-come across on X: the bar icon shows when the page in front has one.
+restore one from its seed, send and receive, tip the Monero addresses you
+come across on X, and tip the authors of installed plugins that publish an
+address. The bar icon shows when the page in front has one.
 
 There is no local node and no blockchain on your computer. The wallet talks to
 a public node you pick; your keys stay in an encrypted wallet file on this
@@ -159,19 +160,41 @@ from, and the send form says the address is not verified.
 
 ### For plugin authors
 
-Add one field to your plugin's `manifest.json`:
+The Plugins tab reads each installed plugin's `manifest.json`. This is enough
+to show a row with **Tip**:
 
 ```json
-"funding": { "monero": "4..." }
+{
+  "id": "io.github.you.plugin",
+  "name": "Your plugin",
+  "author": "yourname",
+  "homepage": "https://github.com/you/plugin",
+  "funding": { "monero": "4..." }
+}
 ```
 
-- A standard address or a subaddress, mainnet. A subaddress per plugin lets
-  you tell the tips apart.
-- Omarchy ignores fields it does not know, so the plugin still validates and
-  loads as before.
-- Anything else that reads manifests, a plugin manager for instance, can offer
-  the same button by opening `monero:<address>?recipient_name=<plugin name>`.
-  Any Monero wallet that handles `monero:` links will answer it.
+`funding.monero` is your address. The other fields are what the row shows.
+
+- The address is 95 characters, a standard address or a subaddress. On mainnet
+  it starts with 4 or 8. On stagenet it starts with 5 or 7. An integrated
+  address, 106 characters, is accepted too. A subaddress per plugin keeps the
+  tips separate.
+- The row appears only when omanero's wallet is on that same network. A
+  mainnet address stays hidden while the wallet is on stagenet.
+- `id` is the plugin id: it starts with a letter or digit, then letters,
+  digits, dots, underscores or hyphens.
+- `name` is the label on the row. With no name, the row uses the id.
+- `author` is shown as "by yourname".
+- `homepage` is shown as where the plugin came from. It has to be an `https://`
+  URL. Any other value is left out, and the row shows the id instead.
+- The file that counts is the installed one,
+  `~/.config/omarchy/plugins/<folder>/manifest.json`. After you publish the
+  field, update the installed plugin. A folder whose name starts with a dot
+  is skipped.
+
+Omarchy ignores fields it does not know, so a plugin with `funding` still
+validates and loads. The address is not checked against the author. The row
+shows the homepage so the sender can see where that copy came from.
 
 ## Command line
 
