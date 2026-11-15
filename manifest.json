@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.sette7blo.omanero",
+  "name": "Omanero",
+  "version": "0.1.0",
+  "author": "sette7blo",
+  "license": "MIT",
+  "description": "A small hot Monero wallet in the Omarchy bar: create or restore from a seed, send and receive through a remote node, and tip Monero addresses you come across on X.",
+  "homepage": "https://github.com/sette7blo/omanero",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Monero",
+    "description": "A light Monero wallet with a panel to send, receive and pay monero: links. No local node.",
+    "category": "Finance",
+    "aliases": [
+      "omanero",
+      "monero",
+      "xmr",
+      "wallet"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -1,0 +1,11 @@
+*.bak.*
+*.swp
+*.tmp
+.DS_Store
+__pycache__/
+
+# install.sh renders this from omanero.desktop.in
+omanero.desktop
+
+# Local notes, never pushed
+CLAUDE.md

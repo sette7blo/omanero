@@ -1,0 +1,311 @@
+// Pure-JS helpers shared by Service.qml, Panel.qml and BarWidget.qml: reading
+// what bin/omanero prints and turning it into the strings the panel shows.
+// No QML types in here, so the whole file runs under Node for tests.
+//
+// The wallet logic is not here. It lives in bin/omanero; this file only
+// re-checks the shape of its output before anything reaches the UI.
+
+var PLUGIN_ID = "io.github.sette7blo.omanero"
+var MAX_TEXT = 120
+var MAX_ERROR = 300
+var MAX_HISTORY = 50
+
+var ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{95}$|^[1-9A-HJ-NP-Za-km-z]{106}$/
+var AMOUNT_RE = /^\d{1,10}(\.\d{1,12})?$/
+var NODE_RE = /^(https?:\/\/)?[A-Za-z0-9.-]{1,253}:\d{1,5}$/
+var HEX64_RE = /^[0-9a-f]{64}$/
+var ID_RE = /^[0-9a-f]{1,32}$/
+var HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/
+var SEED_RE = /^[a-z]+( [a-z]+){24}$/
+
+function text(value, max) {
+  if (typeof value !== "string" && typeof value !== "number") return ""
+  return String(value).replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, max || MAX_TEXT)
+}
+
+function int(value) {
+  var n = Number(value)
+  return isFinite(n) && n >= 0 ? Math.floor(n) : 0
+}
+
+function amount(value) {
+  var s = typeof value === "string" ? value : ""
+  return AMOUNT_RE.test(s) ? s : "0"
+}
+
+function address(value) {
+  var s = typeof value === "string" ? value : ""
+  return ADDRESS_RE.test(s) ? s : ""
+}
+
+function node(value) {
+  var s = typeof value === "string" ? value : ""
+  return NODE_RE.test(s) ? s : ""
+}
+
+function parseJson(raw) {
+  try {
+    var data = JSON.parse(String(raw || ""))
+    return data && typeof data === "object" && !Array.isArray(data) ? data : null
+  } catch (e) {
+    return null
+  }
+}
+
+function emptyStatus() {
+  return {
+    installed: true, network: "mainnet", node: "", customNode: "", nodes: [],
+    autoLockMinutes: 30, walletExists: false, restoreHeight: 0,
+    unlocked: false, busy: false, synced: false, nodeReachable: true,
+    address: "", balance: "0", unlockedBalance: "0", height: 0, daemonHeight: 0,
+    request: null, page: []
+  }
+}
+
+function parseRequest(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var id = typeof raw.id === "string" && ID_RE.test(raw.id) ? raw.id : ""
+  var to = address(raw.address)
+  if (!id || !to) return null
+  return {
+    id: id, address: to,
+    amount: raw.amount ? amount(raw.amount) : "",
+    recipient: text(raw.recipient), description: text(raw.description)
+  }
+}
+
+// Monero addresses the browser extension sees on the X page in front.
+function parsePage(raw) {
+  var items = []
+  var list = Array.isArray(raw) ? raw : []
+  for (var i = 0; i < list.length && items.length < 5; i++) {
+    var to = list[i] && typeof list[i] === "object" ? address(list[i].address) : ""
+    if (!to) continue
+    var handle = typeof list[i].handle === "string" && HANDLE_RE.test(list[i].handle) ? list[i].handle : ""
+    items.push({ address: to, handle: handle, source: list[i].source === "bio" ? "bio" : "post" })
+  }
+  return items
+}
+
+function parseStatus(raw) {
+  var data = parseJson(raw)
+  if (!data || data.ok !== true) return null
+  var nodes = []
+  var list = Array.isArray(data.nodes) ? data.nodes : []
+  for (var i = 0; i < list.length && nodes.length < 8; i++) {
+    if (node(list[i])) nodes.push(list[i])
+  }
+  return {
+    installed: data.installed === true,
+    network: data.network === "stagenet" ? "stagenet" : "mainnet",
+    node: node(data.node), customNode: node(data.customNode), nodes: nodes,
+    autoLockMinutes: Math.min(1440, int(data.autoLockMinutes)),
+    walletExists: data.walletExists === true,
+    restoreHeight: int(data.restoreHeight),
+    unlocked: data.unlocked === true, busy: data.busy === true,
+    synced: data.synced === true, nodeReachable: data.nodeReachable !== false,
+    address: address(data.address),
+    balance: amount(data.balance), unlockedBalance: amount(data.unlockedBalance),
+    height: int(data.height), daemonHeight: int(data.daemonHeight),
+    request: parseRequest(data.request), page: parsePage(data.page)
+  }
+}
+
+// What a command printed: { ok: true, ...fields } or { ok: false, error }.
+function parseResult(raw) {
+  var data = parseJson(raw)
+  if (!data) return { ok: false, error: "No readable answer from the wallet tool." }
+  if (data.ok !== true) return { ok: false, error: text(data.error, MAX_ERROR) || "The wallet tool reported an error." }
+  return data
+}
+
+function parseSeed(result) {
+  var seed = typeof result.seed === "string" && SEED_RE.test(result.seed) ? result.seed : ""
+  if (!seed) return null
+  return { seed: seed, address: address(result.address), restoreHeight: int(result.restoreHeight) }
+}
+
+function parseReview(result) {
+  var id = typeof result.id === "string" && ID_RE.test(result.id) ? result.id : ""
+  var to = address(result.address)
+  if (!id || !to) return null
+  return { id: id, address: to, amount: amount(result.amount), fee: amount(result.fee), total: amount(result.total) }
+}
+
+function parseReceipt(result) {
+  var hash = typeof result.txHash === "string" && HEX64_RE.test(result.txHash) ? result.txHash : ""
+  return { txHash: hash, amount: amount(result.amount), fee: amount(result.fee) }
+}
+
+function parseTransfers(result) {
+  var rows = []
+  var list = Array.isArray(result.transfers) ? result.transfers : []
+  for (var i = 0; i < list.length && rows.length < MAX_HISTORY; i++) {
+    var t = list[i]
+    if (!t || typeof t !== "object") continue
+    var kind = ["in", "out", "pending", "pool"].indexOf(t.kind) !== -1 ? t.kind : ""
+    if (!kind) continue
+    rows.push({
+      kind: kind, incoming: kind === "in" || kind === "pool",
+      amount: amount(t.amount), fee: amount(t.fee),
+      timestamp: int(t.timestamp), confirmations: int(t.confirmations)
+    })
+  }
+  return rows
+}
+
+// A square of 0/1 rows, quiet zone included. Anything else draws nothing
+// rather than a code that cannot scan.
+function parseQr(result) {
+  var rows = Array.isArray(result.rows) ? result.rows : []
+  var to = address(result.address)
+  if (!to || rows.length < 21 || rows.length > 185) return null
+  for (var i = 0; i < rows.length; i++) {
+    if (typeof rows[i] !== "string" || rows[i].length !== rows.length || !/^[01]+$/.test(rows[i])) return null
+  }
+  return { address: to, rows: rows, size: rows.length }
+}
+
+// ----- Display ------------------------------------------------------------
+
+function shortAddress(value) {
+  var s = address(value)
+  return s ? s.slice(0, 8) + "..." + s.slice(-8) : ""
+}
+
+// An address in groups of four reads back against the source far more
+// reliably than one unbroken line.
+function groupedAddress(value) {
+  var s = address(value)
+  return s ? s.replace(/(.{4})/g, "$1 ").replace(/ $/, "") : ""
+}
+
+function plural(n, one, many) {
+  return n + " " + (n === 1 ? one : many)
+}
+
+function syncLine(st) {
+  if (!st || !st.unlocked) return ""
+  var left = st.daemonHeight - st.height
+  // While it scans, the wallet answers only now and then; the counts are the
+  // last ones it gave.
+  if (st.busy) return left > 1 && st.height > 0 ? "Syncing, about " + plural(left, "block", "blocks") + " to go" : "Syncing with the network"
+  if (!st.nodeReachable) return "Node unreachable"
+  if (st.synced) return "Synced"
+  return left > 0 ? "Syncing, " + plural(left, "block", "blocks") + " to go" : "Syncing"
+}
+
+// missing | setup | locked | syncing | ready
+function level(st) {
+  if (!st) return "locked"
+  if (!st.installed) return "missing"
+  if (!st.walletExists) return "setup"
+  if (!st.unlocked) return "locked"
+  return st.synced && !st.busy ? "ready" : "syncing"
+}
+
+function tipName(item) {
+  return item.handle ? "@" + item.handle : shortAddress(item.address)
+}
+
+function tipNames(items) {
+  var names = []
+  for (var i = 0; i < (items || []).length; i++) names.push(tipName(items[i]))
+  return names.join(", ")
+}
+
+// A page can show any address under any name, so the wording never claims
+// more than where the address was seen.
+function tipNote(item) {
+  var where = item.source === "bio" ? "the X bio" : "a post on X"
+  return "This address was found in " + where + (item.handle ? " of @" + item.handle : "")
+    + ". Nobody has verified it; check it before sending."
+}
+
+function tooltip(st) {
+  if (st && st.page.length > 0) return "Monero address on this page: " + tipNames(st.page)
+  var lv = level(st)
+  if (lv === "missing") return "Monero wallet: wallet tools not installed"
+  if (lv === "setup") return "Monero wallet: not set up"
+  if (lv === "locked") return "Monero wallet: locked"
+  if (lv === "syncing") return "Monero wallet: syncing"
+  return "Monero wallet: unlocked"
+}
+
+function heroMeta(st) {
+  var lv = level(st)
+  if (lv === "missing") return "Not installed"
+  if (lv === "setup") return "No wallet yet"
+  if (lv === "locked") return "Locked"
+  return st.balance + " XMR"
+}
+
+function networkLine(st) {
+  if (!st) return ""
+  return (st.network === "stagenet" ? "Stagenet" : "Mainnet") + (st.node ? " via " + st.node : "")
+}
+
+function passwordProblem(first, second) {
+  if (String(first || "") === "") return "Choose a password."
+  if (first !== second) return "The two passwords do not match."
+  return ""
+}
+
+function seedProblem(seed) {
+  var words = String(seed || "").replace(/^\s+|\s+$/g, "").split(/\s+/)
+  if (words.length === 1 && words[0] === "") return "Enter the 25-word seed."
+  if (words.length === 16) return "This is a 16-word Polyseed. Only 25-word seeds can be restored for now."
+  if (words.length !== 25) return "A Monero seed has 25 words; this one has " + words.length + "."
+  return ""
+}
+
+function sendProblem(to, value, network) {
+  var a = String(to || "").replace(/\s+/g, "")
+  if (a === "") return "Enter the address to pay."
+  if (!ADDRESS_RE.test(a)) return "That is not a Monero address."
+  var prefixes = network === "stagenet" ? "57" : "48"
+  if (prefixes.indexOf(a.charAt(0)) === -1) return "That address is for another network."
+  var v = String(value || "").replace(/\s+/g, "")
+  if (v === "") return "Enter an amount."
+  if (!/^\d{1,9}(\.\d{1,12})?$/.test(v) || Number(v) <= 0) return "Write the amount with a dot for decimals, for example 0.05."
+  return ""
+}
+
+function timeAgo(seconds, nowMs) {
+  if (!(seconds > 0)) return ""
+  var diff = Math.floor(nowMs / 1000) - seconds
+  if (diff < 60) return "just now"
+  if (diff < 3600) return plural(Math.floor(diff / 60), "minute", "minutes") + " ago"
+  if (diff < 86400) return plural(Math.floor(diff / 3600), "hour", "hours") + " ago"
+  if (diff < 86400 * 60) return plural(Math.floor(diff / 86400), "day", "days") + " ago"
+  return new Date(seconds * 1000).toISOString().slice(0, 10)
+}
+
+function transferRows(transfers, nowMs) {
+  var rows = []
+  var list = transfers || []
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i]
+    var waiting = t.kind === "pending" || t.kind === "pool"
+    rows.push({
+      title: (t.incoming ? "+" : "-") + t.amount + " XMR",
+      subtitle: timeAgo(t.timestamp, nowMs),
+      right: waiting ? "Waiting for a block"
+        : (t.confirmations < 10 ? plural(t.confirmations, "confirmation", "confirmations") : "Confirmed"),
+      incoming: t.incoming, waiting: waiting
+    })
+  }
+  return rows
+}
+
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    PLUGIN_ID: PLUGIN_ID, emptyStatus: emptyStatus, parseStatus: parseStatus, parseResult: parseResult,
+    parseSeed: parseSeed, parseReview: parseReview, parseReceipt: parseReceipt,
+    parseTransfers: parseTransfers, parseQr: parseQr, parsePage: parsePage,
+    tipName: tipName, tipNames: tipNames, tipNote: tipNote, shortAddress: shortAddress, groupedAddress: groupedAddress,
+    syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine,
+    passwordProblem: passwordProblem, seedProblem: seedProblem, sendProblem: sendProblem,
+    timeAgo: timeAgo, transferRows: transferRows
+  }
+}

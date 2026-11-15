@@ -1,0 +1,1355 @@
+#!/usr/bin/env python3
+# omanero: a small hot Monero wallet for the Omarchy bar.
+#
+# Everything that touches the wallet goes through this file. It drives a local
+# monero-wallet-rpc that talks to a remote node; there is no local blockchain.
+# The panel calls it with --json and writes secrets to its stdin as one JSON
+# line, so a seed or a password never appears on a command line.
+
+import argparse
+import datetime
+import fcntl
+import getpass
+import hashlib
+import http.client
+import json
+import os
+import re
+import secrets
+import shutil
+import signal
+import socket
+import ssl
+import struct
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+
+PLUGIN_ID = "io.github.sette7blo.omanero"
+# Fixed by the "key" in extension/manifest.json.
+EXTENSION_ORIGIN = "chrome-extension://lkdojiemjmekaibbklkoheninffafick/"
+WALLET_NAME = "omanero"
+RPC_USER = "omanero"
+ATOMIC_PER_XMR = 10 ** 12
+
+# Mainnet nodes are the ones Cake Wallet ships as its defaults.
+NETWORKS = {
+    "mainnet": {
+        "rpcPort": 18088,
+        "nodePort": 18081,
+        "prefixes": "48",
+        "nodes": [
+            "xmr-node.cakewallet.com:18081",
+            "node.sethforprivacy.com:443",
+            "nodes.hashvault.pro:18081",
+        ],
+    },
+    "stagenet": {
+        "rpcPort": 38088,
+        "nodePort": 38081,
+        "prefixes": "57",
+        "nodes": [
+            "node.monerodevs.org:38089",
+            "stagenet.xmr-tw.org:38081",
+        ],
+    },
+}
+
+DEFAULT_CONFIG = {"network": "mainnet", "node": "", "autoLockMinutes": 30, "rpcPort": 0}
+MAX_AUTO_LOCK_MINUTES = 1440
+PENDING_MAX_AGE = 600
+REQUEST_MAX_AGE = 900
+DAEMON_HEIGHT_TTL = 30
+BLOCKS_PER_DAY = 720
+MAX_TEXT = 120
+MAX_HISTORY = 50
+MAX_PAGE_ITEMS = 5
+MAX_BROWSER_MESSAGE = 64 * 1024
+
+ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{95}$|^[1-9A-HJ-NP-Za-km-z]{106}$")
+AMOUNT_RE = re.compile(r"^\d{1,9}(\.\d{1,12})?$")
+NODE_RE = re.compile(r"^(https?://)?([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(:(\d{1,5}))?$")
+HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+class Fail(Exception):
+    pass
+
+
+class RpcError(Exception):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.code = code
+        self.message = message
+
+
+class RpcDown(Exception):
+    def __init__(self, message, timed_out=False):
+        super().__init__(message)
+        self.timed_out = timed_out
+
+
+# ----- Paths ---------------------------------------------------------------
+
+def xdg(name, fallback):
+    value = os.environ.get(name, "")
+    return value if value.startswith("/") else os.path.join(os.path.expanduser("~"), fallback)
+
+
+def config_dir():
+    return os.path.join(xdg("XDG_CONFIG_HOME", ".config"), "omanero")
+
+
+def state_dir():
+    return os.path.join(xdg("XDG_STATE_HOME", ".local/state"), "omarchy", "omanero")
+
+
+def wallet_dir(network):
+    return os.path.join(xdg("XDG_DATA_HOME", ".local/share"), "omanero", network)
+
+
+def state_path(name):
+    return os.path.join(state_dir(), name)
+
+
+def private_dir(path):
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    if os.path.islink(path) or not os.path.isdir(path):
+        raise Fail("%s is not a directory" % path)
+    os.chmod(path, 0o700)
+
+
+def write_private(path, text):
+    private_dir(os.path.dirname(path))
+    tmp = "%s.tmp.%s" % (path, secrets.token_hex(6))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def read_json(path, fallback=None):
+    try:
+        with open(path) as handle:
+            data = json.loads(handle.read(4 * 1024 * 1024))
+    except (OSError, ValueError):
+        return fallback
+    return data if isinstance(data, dict) else fallback
+
+
+def remove(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+# ----- Config --------------------------------------------------------------
+
+def clamp_int(value, low, high, fallback):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, number))
+
+
+def normalize_node(value, network):
+    text = str(value or "").strip().rstrip("/")
+    if text == "":
+        return ""
+    match = NODE_RE.match(text)
+    if not match:
+        raise Fail("A node is written as host:port, for example %s" % NETWORKS[network]["nodes"][0])
+    scheme, host, port = match.group(1) or "", match.group(2), match.group(5)
+    port = int(port) if port else NETWORKS[network]["nodePort"]
+    if not 1 <= port <= 65535:
+        raise Fail("The node port must be between 1 and 65535")
+    return "%s%s:%d" % (scheme, host.lower(), port)
+
+
+def load_config():
+    raw = read_json(os.path.join(config_dir(), "config.json"), {}) or {}
+    cfg = dict(DEFAULT_CONFIG)
+    if raw.get("network") in NETWORKS:
+        cfg["network"] = raw["network"]
+    try:
+        cfg["node"] = normalize_node(raw.get("node", ""), cfg["network"])
+    except Fail:
+        cfg["node"] = ""
+    cfg["autoLockMinutes"] = clamp_int(raw.get("autoLockMinutes"), 0, MAX_AUTO_LOCK_MINUTES, 30)
+    cfg["rpcPort"] = clamp_int(raw.get("rpcPort"), 0, 65535, 0)
+    return cfg
+
+
+def save_config(cfg):
+    os.makedirs(config_dir(), exist_ok=True)
+    path = os.path.join(config_dir(), "config.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w") as handle:
+        handle.write(json.dumps(cfg, indent=2) + "\n")
+    os.replace(tmp, path)
+
+
+def active_node(cfg):
+    return cfg["node"] or NETWORKS[cfg["network"]]["nodes"][0]
+
+
+def rpc_port(cfg):
+    return cfg["rpcPort"] or NETWORKS[cfg["network"]]["rpcPort"]
+
+
+def keys_path(cfg):
+    return os.path.join(wallet_dir(cfg["network"]), WALLET_NAME + ".keys")
+
+
+def meta_path(cfg):
+    return os.path.join(wallet_dir(cfg["network"]), "meta.json")
+
+
+# ----- Amounts, addresses, links -------------------------------------------
+
+def parse_amount(text):
+    value = str(text or "").strip()
+    if not AMOUNT_RE.match(value):
+        raise Fail("Write the amount as a number with a dot for decimals, for example 0.05")
+    whole, _, frac = value.partition(".")
+    atomic = int(whole) * ATOMIC_PER_XMR + int((frac + "0" * 12)[:12])
+    if atomic <= 0:
+        raise Fail("The amount must be more than zero")
+    return atomic
+
+
+def format_xmr(atomic):
+    atomic = int(atomic)
+    sign = "-" if atomic < 0 else ""
+    whole, frac = divmod(abs(atomic), ATOMIC_PER_XMR)
+    digits = ("%012d" % frac).rstrip("0")
+    return sign + str(whole) + ("." + digits if digits else "")
+
+
+def check_address(address, network):
+    value = str(address or "").strip()
+    if not ADDRESS_RE.match(value):
+        raise Fail("That is not a Monero address")
+    if value[0] not in NETWORKS[network]["prefixes"]:
+        raise Fail("That address is not for %s" % network)
+    return value
+
+
+def clean_text(value):
+    text = "".join(ch if ch.isprintable() else " " for ch in str(value or ""))
+    return " ".join(text.split())[:MAX_TEXT]
+
+
+def parse_uri(uri, network):
+    text = str(uri or "").strip()
+    if len(text) > 2000 or text[:7].lower() != "monero:":
+        raise Fail("Not a monero: link")
+    rest = text[7:]
+    if rest.startswith("//"):
+        rest = rest[2:]
+    address, _, query = rest.partition("?")
+    try:
+        params = urllib.parse.parse_qs(query, max_num_fields=20)
+    except ValueError:
+        raise Fail("Not a monero: link")
+    amount = (params.get("tx_amount") or [""])[0].strip()
+    return {
+        "address": check_address(urllib.parse.unquote(address), network),
+        "amount": format_xmr(parse_amount(amount)) if amount else "",
+        "recipient": clean_text((params.get("recipient_name") or [""])[0]),
+        "description": clean_text((params.get("tx_description") or [""])[0]),
+    }
+
+
+def check_seed(seed):
+    words = str(seed or "").lower().split()
+    if len(words) == 16:
+        raise Fail("This is a 16-word Polyseed. Only 25-word Monero seeds can be restored for now.")
+    if len(words) != 25:
+        raise Fail("A Monero seed has 25 words; this one has %d." % len(words))
+    if not all(re.match(r"^[a-z]+$", word) for word in words):
+        raise Fail("A seed is made of plain English words")
+    return " ".join(words)
+
+
+def check_password(password):
+    value = str(password or "")
+    if value == "" or len(value) > 256 or "\n" in value or "\r" in value:
+        raise Fail("Choose a password; it encrypts the wallet file on this computer")
+    return value
+
+
+# ----- HTTP ----------------------------------------------------------------
+
+MAX_BODY = 8 * 1024 * 1024
+
+
+def rpc_payload(method, params):
+    return json.dumps({"jsonrpc": "2.0", "id": "0", "method": method, "params": params or {}}).encode()
+
+
+def rpc_result(body):
+    try:
+        data = json.loads(body)
+    except ValueError:
+        raise RpcDown("unreadable response")
+    if not isinstance(data, dict):
+        raise RpcDown("unreadable response")
+    if isinstance(data.get("error"), dict):
+        raise RpcError(data["error"].get("code", 0), str(data["error"].get("message", "error"))[:300])
+    result = data.get("result")
+    return result if isinstance(result, dict) else {}
+
+
+def md5_hex(text):
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+# monero-wallet-rpc offers both MD5 and MD5-sess digest challenges. Answering
+# them here keeps the login out of every process listing and avoids depending
+# on which of the two a library happens to pick.
+def digest_header(challenges, user, password, method, path):
+    chosen = None
+    for challenge in challenges:
+        if challenge[:7].lower() != "digest ":
+            continue
+        fields = {}
+        for match in re.finditer(r'(\w+)=(?:"([^"]*)"|([^,\s]+))', challenge[7:]):
+            fields[match.group(1).lower()] = match.group(2) if match.group(2) is not None else match.group(3)
+        algorithm = fields.get("algorithm", "MD5").upper()
+        if algorithm not in ("MD5", "MD5-SESS") or "nonce" not in fields:
+            continue
+        if chosen is None or algorithm == "MD5":
+            chosen = fields
+            chosen["algorithm"] = algorithm
+        if algorithm == "MD5":
+            break
+    if chosen is None:
+        raise RpcDown("the wallet service asked for a login this tool does not know")
+    realm, nonce = chosen.get("realm", ""), chosen["nonce"]
+    cnonce, count = secrets.token_hex(8), "00000001"
+    ha1 = md5_hex("%s:%s:%s" % (user, realm, password))
+    if chosen["algorithm"] == "MD5-SESS":
+        ha1 = md5_hex("%s:%s:%s" % (ha1, nonce, cnonce))
+    ha2 = md5_hex("%s:%s" % (method, path))
+    qop = "auth" if "auth" in [q.strip() for q in chosen.get("qop", "").split(",")] else ""
+    if qop:
+        response = md5_hex("%s:%s:%s:%s:%s:%s" % (ha1, nonce, count, cnonce, qop, ha2))
+    else:
+        response = md5_hex("%s:%s:%s" % (ha1, nonce, ha2))
+    parts = ['username="%s"' % user, 'realm="%s"' % realm, 'nonce="%s"' % nonce, 'uri="%s"' % path,
+             "algorithm=%s" % ("MD5-sess" if chosen["algorithm"] == "MD5-SESS" else "MD5"),
+             'response="%s"' % response]
+    if qop:
+        parts += ["qop=auth", "nc=%s" % count, 'cnonce="%s"' % cnonce]
+    if "opaque" in chosen:
+        parts.append('opaque="%s"' % chosen["opaque"])
+    return "Digest " + ", ".join(parts)
+
+
+def local_post(connection, body, authorization=""):
+    headers = {"Content-Type": "application/json"}
+    if authorization:
+        headers["Authorization"] = authorization
+    connection.request("POST", "/json_rpc", body, headers)
+    response = connection.getresponse()
+    return response.status, response.headers.get_all("WWW-Authenticate") or [], response.read(MAX_BODY)
+
+
+def wallet_rpc(method, params=None, timeout=10):
+    session = read_json(state_path("rpc.json"))
+    if not session:
+        raise RpcDown("wallet is not running")
+    body = rpc_payload(method, params)
+    # A direct connection: this never leaves the machine and ignores proxies.
+    # The service ties its login challenge to the connection, so the answer
+    # has to go back on the same one.
+    connection = http.client.HTTPConnection("127.0.0.1", int(session["port"]), timeout=timeout)
+    try:
+        status, challenges, data = local_post(connection, body)
+        if status == 401:
+            header = digest_header(challenges, RPC_USER, str(session["password"]), "POST", "/json_rpc")
+            status, challenges, data = local_post(connection, body, header)
+    except TimeoutError:
+        raise RpcDown("timed out", True)
+    except (OSError, http.client.HTTPException) as error:
+        raise RpcDown(str(error))
+    finally:
+        connection.close()
+    if status != 200:
+        raise RpcDown("HTTP %d" % status)
+    return rpc_result(data)
+
+
+def post_json(opener, url, body, timeout):
+    request = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            data = response.read(MAX_BODY)
+    except urllib.error.HTTPError as error:
+        raise RpcDown("HTTP %d" % error.code)
+    except (urllib.error.URLError, OSError, ValueError) as error:
+        raise RpcDown(str(getattr(error, "reason", error)))
+    return rpc_result(data)
+
+
+def node_urls(node):
+    if node.startswith("http://") or node.startswith("https://"):
+        return [node]
+    # Same order as monero-wallet-rpc's own autodetect.
+    return ["https://" + node, "http://" + node]
+
+
+def daemon_rpc(node, method, params=None, timeout=8):
+    # Public nodes often run self-signed certificates and monero-wallet-rpc
+    # does not verify them either. Only block heights and timestamps are read
+    # here; nothing secret is sent.
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context))
+    last = RpcDown("node unreachable")
+    for base in node_urls(node):
+        try:
+            return post_json(opener, base + "/json_rpc", rpc_payload(method, params), timeout)
+        except RpcDown as error:
+            last = error
+    raise last
+
+
+def daemon_height(node):
+    return clamp_int(daemon_rpc(node, "get_info").get("height"), 0, 10 ** 9, 0)
+
+
+def height_for_date(node, year, month, day):
+    try:
+        target = int(datetime.datetime(year, month, day, tzinfo=datetime.timezone.utc).timestamp())
+    except ValueError:
+        raise Fail("That is not a valid date")
+    try:
+        top = daemon_height(node)
+        if top < 2:
+            raise RpcDown("no height")
+        low, high = 0, top - 1
+        while low < high:
+            mid = (low + high) // 2
+            header = daemon_rpc(node, "get_block_header_by_height", {"height": mid}).get("block_header") or {}
+            if int(header.get("timestamp", 0)) < target:
+                low = mid + 1
+            else:
+                high = mid
+    except (RpcDown, RpcError, ValueError, TypeError):
+        raise Fail("Could not ask the node for that date. Enter a block height instead.")
+    # Block timestamps are loose, so start a day early.
+    return max(0, low - BLOCKS_PER_DAY)
+
+
+def resolve_height(value, node):
+    text = str(value if value is not None else "").strip()
+    if re.match(r"^\d{1,9}$", text):
+        return int(text)
+    match = DATE_RE.match(text)
+    if match:
+        return height_for_date(node, int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    raise Fail("Enter the restore height as a block number or a date like 2024-03-15")
+
+
+# ----- monero-wallet-rpc process --------------------------------------------
+
+def find_binary():
+    override = os.environ.get("OMANERO_WALLET_RPC", "")
+    if override:
+        return override if os.access(override, os.X_OK) else ""
+    return shutil.which("monero-wallet-rpc") or ""
+
+
+def rpc_pid():
+    session = read_json(state_path("rpc.json"))
+    if not session:
+        return 0
+    pid = clamp_int(session.get("pid"), 0, 2 ** 31, 0)
+    if pid <= 1:
+        return 0
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            cmdline = handle.read().decode(errors="replace")
+    except OSError:
+        return 0
+    # A recycled pid belongs to something else; ours names its config file.
+    return pid if state_path("rpc.conf") in cmdline.split("\0") else 0
+
+
+def log_tail():
+    try:
+        with open(state_path("wallet-rpc.log"), "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            handle.seek(max(0, handle.tell() - 600))
+            lines = handle.read().decode(errors="replace").strip().splitlines()
+    except OSError:
+        return ""
+    return clean_text(lines[-1]) if lines else ""
+
+
+def start_rpc(cfg):
+    if rpc_pid():
+        return
+    binary = find_binary()
+    if not binary:
+        raise Fail("monero-wallet-rpc is not installed. Install it with: sudo pacman -S monero")
+    port = rpc_port(cfg)
+    probe = socket.socket()
+    # Without this a port the service just released still reads as taken.
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except OSError:
+        raise Fail("Port %d is in use. Set another one with: omanero config set rpcPort <port>" % port)
+    finally:
+        probe.close()
+
+    private_dir(state_dir())
+    os.makedirs(wallet_dir(cfg["network"]), mode=0o700, exist_ok=True)
+    password = secrets.token_hex(24)
+    lines = [
+        "wallet-dir=" + wallet_dir(cfg["network"]),
+        "rpc-bind-ip=127.0.0.1",
+        "rpc-bind-port=%d" % port,
+        "rpc-login=%s:%s" % (RPC_USER, password),
+        "daemon-address=" + active_node(cfg),
+        "log-file=" + state_path("wallet-rpc-internal.log"),
+        "log-level=0",
+    ]
+    if cfg["network"] != "mainnet":
+        lines.append(cfg["network"] + "=1")
+    write_private(state_path("rpc.conf"), "\n".join(lines) + "\n")
+
+    log_fd = os.open(state_path("wallet-rpc.log"), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        process = subprocess.Popen(
+            [binary, "--config-file", state_path("rpc.conf"), "--non-interactive"],
+            stdin=subprocess.DEVNULL, stdout=log_fd, stderr=log_fd, start_new_session=True)
+    finally:
+        os.close(log_fd)
+    write_private(state_path("rpc.json"), json.dumps({
+        "pid": process.pid, "port": port, "password": password,
+        "network": cfg["network"], "node": active_node(cfg)}))
+
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        if process.poll() is not None:
+            cleanup_rpc_files()
+            raise Fail("The wallet service stopped while starting. " + log_tail())
+        try:
+            wallet_rpc("get_version", timeout=3)
+            return
+        except (RpcDown, RpcError):
+            time.sleep(0.25)
+    stop_rpc()
+    raise Fail("The wallet service did not start in time. " + log_tail())
+
+
+def cleanup_rpc_files():
+    for name in ("rpc.json", "rpc.conf", "session.json", "pending.json"):
+        remove(state_path(name))
+
+
+def wait_gone(pid, seconds):
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except OSError:
+            pass
+        if not rpc_pid():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def stop_rpc():
+    pid = rpc_pid()
+    if pid:
+        # close_wallet saves the wallet file before the service exits.
+        for method, timeout in (("close_wallet", 60), ("stop_wallet", 15)):
+            try:
+                wallet_rpc(method, timeout=timeout)
+            except (RpcDown, RpcError):
+                pass
+        if not wait_gone(pid, 15):
+            for sig, seconds in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+                try:
+                    os.kill(pid, sig)
+                except OSError:
+                    break
+                if wait_gone(pid, seconds):
+                    break
+    cleanup_rpc_files()
+
+
+# ----- Wallet state ----------------------------------------------------------
+
+def touch_session(**patch):
+    session = read_json(state_path("session.json"), {}) or {}
+    session.update(patch)
+    session["lastActivity"] = int(time.time())
+    write_private(state_path("session.json"), json.dumps(session))
+
+
+def open_address():
+    # Empty when the service runs with no wallet open.
+    try:
+        return str(wallet_rpc("get_address", {"account_index": 0}, timeout=3).get("address", ""))
+    except RpcError:
+        return ""
+
+
+def require_unlocked():
+    if not rpc_pid():
+        raise Fail("The wallet is locked")
+    try:
+        address = open_address()
+    except RpcDown as error:
+        if error.timed_out:
+            raise Fail("The wallet is busy syncing. Try again in a moment.")
+        raise Fail("The wallet is locked")
+    if not address:
+        raise Fail("The wallet is locked")
+    return address
+
+
+def cached_daemon_height(cfg, session):
+    now = int(time.time())
+    if now - int(session.get("daemonAt", 0)) < DAEMON_HEIGHT_TTL and session.get("daemonNode") == active_node(cfg):
+        return int(session.get("daemonHeight", 0)), session
+    try:
+        height = daemon_height(active_node(cfg))
+    except (RpcDown, RpcError):
+        height = 0
+    session.update({"daemonHeight": height, "daemonAt": now, "daemonNode": active_node(cfg)})
+    return height, session
+
+
+def load_request(cfg):
+    request = read_json(state_path("request.json"))
+    if not request or not request.get("id"):
+        return None
+    # A link clicked long ago should not pop the panel open at the next login.
+    if time.time() - clamp_int(request.get("at"), 0, 2 ** 40, 0) > REQUEST_MAX_AGE:
+        return None
+    try:
+        address = check_address(request.get("address"), cfg["network"])
+        amount = format_xmr(parse_amount(request["amount"])) if request.get("amount") else ""
+    except Fail:
+        return None
+    return {
+        "id": str(request["id"])[:32], "address": address, "amount": amount,
+        "recipient": clean_text(request.get("recipient")),
+        "description": clean_text(request.get("description")),
+    }
+
+
+def page_items(raw, network):
+    items = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(items) >= MAX_PAGE_ITEMS:
+            continue
+        try:
+            address = check_address(item.get("address"), network)
+        except Fail:
+            continue
+        handle = str(item.get("handle") or "")
+        items.append({"address": address, "handle": handle if HANDLE_RE.match(handle) else "",
+                      "source": "bio" if item.get("source") == "bio" else "post"})
+    return items
+
+
+def host_alive(pid):
+    try:
+        with open("/proc/%d/cmdline" % pid, "rb") as handle:
+            return EXTENSION_ORIGIN.encode() in handle.read()
+    except (OSError, ValueError):
+        return False
+
+
+def load_page(cfg):
+    page = read_json(state_path("page.json"), {}) or {}
+    # Left behind by a browser that died without closing its end.
+    if not host_alive(clamp_int(page.get("pid"), 0, 2 ** 31, 0)):
+        return []
+    return page_items(page.get("items"), cfg["network"])
+
+
+def ensure_watched():
+    # The panel can only watch files that exist, so they are emptied, never
+    # removed.
+    for name in ("request.json", "page.json"):
+        if not os.path.exists(state_path(name)):
+            write_watched(name, {})
+
+
+def base_status(cfg):
+    ensure_watched()
+    meta = read_json(meta_path(cfg), {}) or {}
+    return {
+        "installed": find_binary() != "",
+        "network": cfg["network"],
+        "node": active_node(cfg),
+        "customNode": cfg["node"],
+        "nodes": NETWORKS[cfg["network"]]["nodes"],
+        "autoLockMinutes": cfg["autoLockMinutes"],
+        "walletExists": os.path.exists(keys_path(cfg)),
+        "restoreHeight": clamp_int(meta.get("restoreHeight"), 0, 10 ** 9, 0),
+        "knownAddress": str(meta.get("address") or ""),
+        "unlocked": False, "busy": False, "synced": False,
+        "address": "", "balance": "0", "unlockedBalance": "0",
+        "height": 0, "daemonHeight": 0, "nodeReachable": True,
+        "request": load_request(cfg),
+        "page": load_page(cfg),
+    }
+
+
+def status(cfg, active=False):
+    out = base_status(cfg)
+    if not rpc_pid():
+        if read_json(state_path("rpc.json")):
+            cleanup_rpc_files()
+        return out
+    session = read_json(state_path("session.json"), {}) or {}
+    now = int(time.time())
+    if active:
+        session["lastActivity"] = now
+
+    try:
+        address = open_address()
+        if not address:
+            stop_rpc()
+            return out
+        balance = wallet_rpc("get_balance", {"account_index": 0}, timeout=5)
+        height = clamp_int(wallet_rpc("get_height", timeout=5).get("height"), 0, 10 ** 9, 0)
+    except RpcDown as error:
+        if not error.timed_out and not rpc_pid():
+            cleanup_rpc_files()
+            return out
+        # The service answers nothing while it scans a batch of blocks, which
+        # for a new or restored wallet can go on for minutes.
+        last = session.get("last") or {}
+        out.update({k: last[k] for k in ("address", "balance", "unlockedBalance", "height") if k in last})
+        daemon, session = cached_daemon_height(cfg, session)
+        out.update({"unlocked": True, "busy": True, "daemonHeight": daemon,
+                    "address": out["address"] or out["knownAddress"]})
+        session.setdefault("lastActivity", now)
+        write_private(state_path("session.json"), json.dumps(session))
+        return out
+
+    daemon, session = cached_daemon_height(cfg, session)
+    out.update({
+        "unlocked": True, "address": address,
+        "balance": format_xmr(balance.get("balance", 0)),
+        "unlockedBalance": format_xmr(balance.get("unlocked_balance", 0)),
+        "height": height, "daemonHeight": daemon, "nodeReachable": daemon > 0,
+        "synced": daemon > 0 and height >= daemon - 1,
+    })
+
+    idle = now - int(session.get("lastActivity", now))
+    limit = cfg["autoLockMinutes"] * 60
+    # A restore can scan for hours; do not lock it out from under itself.
+    if limit > 0 and idle >= limit and (out["synced"] or not out["nodeReachable"]):
+        stop_rpc()
+        locked = base_status(cfg)
+        return locked
+
+    session["last"] = {k: out[k] for k in ("address", "balance", "unlockedBalance", "height", "daemonHeight")}
+    session.setdefault("lastActivity", now)
+    write_private(state_path("session.json"), json.dumps(session))
+    return out
+
+
+def creation_height(cfg):
+    try:
+        return max(0, daemon_height(active_node(cfg)) - 5)
+    except (RpcDown, RpcError):
+        pass
+    try:
+        return max(0, clamp_int(wallet_rpc("get_height").get("height"), 0, 10 ** 9, 0) - 5)
+    except (RpcDown, RpcError):
+        return 0
+
+
+def write_meta(cfg, restore_height, address):
+    write_private(meta_path(cfg), json.dumps({
+        "restoreHeight": restore_height, "address": address, "createdAt": int(time.time())}))
+
+
+def refuse_existing(cfg):
+    if os.path.exists(keys_path(cfg)):
+        raise Fail("A wallet already exists in %s. Move it away first if you want to replace it."
+                   % wallet_dir(cfg["network"]))
+
+
+def cmd_create(cfg, data):
+    password = check_password(data.get("password"))
+    refuse_existing(cfg)
+    # The service asks the node for the current height when it creates a
+    # wallet. Without an answer the new wallet would scan the whole chain.
+    try:
+        daemon_height(active_node(cfg))
+    except (RpcDown, RpcError):
+        raise Fail("The node %s is not answering. Pick another one in Settings, then try again."
+                   % active_node(cfg))
+    stop_rpc()
+    start_rpc(cfg)
+    try:
+        wallet_rpc("create_wallet",
+                   {"filename": WALLET_NAME, "password": password, "language": "English"}, timeout=120)
+        seed = str(wallet_rpc("query_key", {"key_type": "mnemonic"}, timeout=30).get("key", ""))
+        address = open_address()
+        if not seed or not address:
+            raise Fail("The wallet was created but its seed could not be read. Run: omanero seed")
+    except (RpcDown, RpcError) as error:
+        stop_rpc()
+        raise Fail("Could not create the wallet: %s" % error)
+    height = creation_height(cfg)
+    write_meta(cfg, height, address)
+    touch_session()
+    return {"seed": seed, "address": address, "restoreHeight": height}
+
+
+def cmd_restore(cfg, data):
+    password = check_password(data.get("password"))
+    seed = check_seed(data.get("seed"))
+    refuse_existing(cfg)
+    height = resolve_height(data.get("restoreHeight"), active_node(cfg))
+    stop_rpc()
+    start_rpc(cfg)
+    try:
+        result = wallet_rpc("restore_deterministic_wallet", {
+            "filename": WALLET_NAME, "password": password, "seed": seed,
+            "restore_height": height, "language": "English"}, timeout=300)
+    except RpcError as error:
+        stop_rpc()
+        raise Fail("Could not restore: %s" % error.message)
+    except RpcDown as error:
+        stop_rpc()
+        raise Fail("Could not restore: %s" % error)
+    address = str(result.get("address", ""))
+    write_meta(cfg, height, address)
+    touch_session()
+    return {"address": address, "restoreHeight": height}
+
+
+def cmd_unlock(cfg, data):
+    password = str(data.get("password") or "")
+    if not os.path.exists(keys_path(cfg)):
+        raise Fail("There is no wallet yet")
+    if rpc_pid():
+        try:
+            if open_address():
+                touch_session()
+                return {}
+        except RpcDown:
+            pass
+        stop_rpc()
+    start_rpc(cfg)
+    try:
+        wallet_rpc("open_wallet", {"filename": WALLET_NAME, "password": password}, timeout=120)
+    except RpcError:
+        stop_rpc()
+        raise Fail("Wrong password")
+    except RpcDown as error:
+        stop_rpc()
+        raise Fail("Could not open the wallet: %s" % error)
+    touch_session()
+    return {}
+
+
+def cmd_lock(cfg, data):
+    stop_rpc()
+    return {}
+
+
+def cmd_preview(cfg, data):
+    require_unlocked()
+    address = check_address(data.get("address"), cfg["network"])
+    amount = parse_amount(data.get("amount"))
+    try:
+        check = wallet_rpc("validate_address", {"address": address}, timeout=10)
+        if not check.get("valid") or check.get("nettype") not in (None, "", cfg["network"]):
+            raise Fail("That address is not valid on %s" % cfg["network"])
+        # Built and signed but not broadcast, so the fee on the confirmation
+        # is the real one and what gets sent is exactly what was reviewed.
+        tx = wallet_rpc("transfer", {
+            "destinations": [{"amount": amount, "address": address}],
+            "account_index": 0, "priority": 0,
+            "do_not_relay": True, "get_tx_metadata": True}, timeout=180)
+    except RpcError as error:
+        if "not enough" in error.message.lower():
+            raise Fail("Not enough spendable money for this amount and its fee.")
+        raise Fail(clean_text(error.message) or "The transaction could not be built")
+    except RpcDown as error:
+        raise Fail("The wallet is busy syncing. Try again in a moment." if error.timed_out
+                   else "The wallet stopped responding")
+    metadata = str(tx.get("tx_metadata", ""))
+    if not metadata or int(tx.get("amount", -1)) != amount:
+        raise Fail("The wallet built an unexpected transaction; nothing was sent")
+    fee = int(tx.get("fee", 0))
+    pending = {"id": secrets.token_hex(8), "address": address, "amount": amount, "fee": fee,
+               "metadata": metadata, "createdAt": int(time.time())}
+    write_private(state_path("pending.json"), json.dumps(pending))
+    touch_session()
+    return {"id": pending["id"], "address": address, "amount": format_xmr(amount),
+            "fee": format_xmr(fee), "total": format_xmr(amount + fee)}
+
+
+def cmd_relay(cfg, data):
+    require_unlocked()
+    pending = read_json(state_path("pending.json"))
+    if not pending or str(data.get("id") or "") != pending.get("id"):
+        raise Fail("Nothing to send. Review the payment again.")
+    remove(state_path("pending.json"))
+    if time.time() - int(pending.get("createdAt", 0)) > PENDING_MAX_AGE:
+        raise Fail("The review is too old. Review the payment again.")
+    try:
+        result = wallet_rpc("relay_tx", {"hex": pending["metadata"]}, timeout=120)
+    except RpcError as error:
+        raise Fail("The node did not accept it: %s" % clean_text(error.message))
+    except RpcDown:
+        raise Fail("No answer from the wallet. Check History before sending again.")
+    remove(state_path("request.json"))
+    touch_session()
+    tx_hash = str(result.get("tx_hash", "")).lower()
+    return {"txHash": tx_hash if HEX64_RE.match(tx_hash) else "",
+            "amount": format_xmr(pending["amount"]), "fee": format_xmr(pending["fee"])}
+
+
+def cmd_history(cfg, data):
+    require_unlocked()
+    try:
+        result = wallet_rpc("get_transfers", {
+            "in": True, "out": True, "pending": True, "pool": True, "account_index": 0}, timeout=30)
+    except (RpcDown, RpcError):
+        raise Fail("The wallet is busy syncing. Try again in a moment.")
+    rows = []
+    for kind in ("in", "out", "pending", "pool"):
+        for item in (result.get(kind) or [])[:2000]:
+            if not isinstance(item, dict):
+                continue
+            txid = str(item.get("txid", "")).lower()
+            rows.append({
+                "kind": kind,
+                "incoming": kind in ("in", "pool"),
+                "amount": format_xmr(clamp_int(item.get("amount"), 0, 10 ** 22, 0)),
+                "fee": format_xmr(clamp_int(item.get("fee"), 0, 10 ** 22, 0)),
+                "timestamp": clamp_int(item.get("timestamp"), 0, 2 ** 40, 0),
+                "confirmations": clamp_int(item.get("confirmations"), 0, 10 ** 9, 0),
+                "txid": txid if HEX64_RE.match(txid) else "",
+            })
+    rows.sort(key=lambda row: row["timestamp"], reverse=True)
+    return {"transfers": rows[:MAX_HISTORY]}
+
+
+def write_watched(name, value):
+    private_dir(state_dir())
+    # Written in place, not renamed, so the panel's file watch keeps firing.
+    fd = os.open(state_path(name), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(json.dumps(value))
+
+
+def post_request(request):
+    request["id"] = secrets.token_hex(8)
+    request["at"] = int(time.time())
+    write_watched("request.json", request)
+    summon_panel()
+    return request
+
+
+def cmd_uri(cfg, data):
+    return post_request(parse_uri(data.get("uri"), cfg["network"]))
+
+
+def summon_panel():
+    # A browser or a link handler may start this with a short PATH.
+    tool = shutil.which("omarchy-shell") or shutil.which("omarchy-shell", path="/usr/share/omarchy/bin")
+    # The tests set this so they never pop the panel open on a real desktop.
+    if not tool or os.environ.get("OMANERO_NO_SUMMON"):
+        return
+    env = dict(os.environ)
+    if not env.get("OMARCHY_PATH") and os.path.exists("/usr/share/omarchy/shell/shell.qml"):
+        env["OMARCHY_PATH"] = "/usr/share/omarchy"
+    try:
+        subprocess.run([tool, "-q", "shell", "summon", PLUGIN_ID], env=env, timeout=5,
+                       stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def cmd_open(cfg, data):
+    if data.get("uri"):
+        return cmd_uri(cfg, data)
+    summon_panel()
+    return {}
+
+
+def cmd_dismiss(cfg, data):
+    write_watched("request.json", {})
+    remove(state_path("pending.json"))
+    return {}
+
+
+def cmd_config(cfg, data):
+    changes = data.get("set") or {}
+    if not changes:
+        return {"config": cfg}
+    nxt = dict(cfg)
+    if "network" in changes:
+        if changes["network"] not in NETWORKS:
+            raise Fail("The network is mainnet or stagenet")
+        if changes["network"] != cfg["network"]:
+            nxt["network"] = changes["network"]
+            nxt["node"] = ""
+    if "node" in changes:
+        nxt["node"] = normalize_node(changes["node"], nxt["network"])
+    if "autoLockMinutes" in changes:
+        nxt["autoLockMinutes"] = clamp_int(changes["autoLockMinutes"], 0, MAX_AUTO_LOCK_MINUTES, 30)
+    if "rpcPort" in changes:
+        nxt["rpcPort"] = clamp_int(changes["rpcPort"], 0, 65535, 0)
+    restart = any(nxt[k] != cfg[k] for k in ("network", "node", "rpcPort"))
+    # The service reads its node and network at start, so these lock the wallet.
+    if restart:
+        stop_rpc()
+    save_config(nxt)
+    return {"config": nxt, "locked": restart}
+
+
+def cmd_seed(cfg, data):
+    require_unlocked()
+    try:
+        seed = str(wallet_rpc("query_key", {"key_type": "mnemonic"}, timeout=30).get("key", ""))
+    except (RpcDown, RpcError):
+        raise Fail("The wallet is busy syncing. Try again in a moment.")
+    return {"seed": seed, "restoreHeight": base_status(cfg)["restoreHeight"]}
+
+
+def cmd_qr(cfg):
+    # The address is public and already in meta.json, so this needs neither the
+    # wallet service nor the lock.
+    address = str((read_json(meta_path(cfg), {}) or {}).get("address") or "")
+    try:
+        address = check_address(address, cfg["network"])
+    except Fail:
+        raise Fail("No wallet address yet. Create or restore a wallet first.")
+    tool = os.environ.get("OMANERO_QRENCODE") or shutil.which("qrencode") or ""
+    try:
+        proc = subprocess.run([tool, "--type", "ASCII", "--level", "M", "--margin", "4", "--output", "-"],
+                              input="monero:" + address, capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        raise Fail("qrencode is not installed. Install it with: sudo pacman -S qrencode")
+    # ASCII output is two characters per module.
+    rows = ["".join("1" if "#" in line[i:i + 2] else "0" for i in range(0, len(line), 2))
+            for line in proc.stdout.splitlines() if line]
+    if proc.returncode != 0 or not 21 <= len(rows) <= 185 or any(len(row) != len(rows) for row in rows):
+        raise Fail("Could not draw the QR code.")
+    return {"address": address, "rows": rows}
+
+
+# ----- Browser extension -------------------------------------------------------
+
+def read_browser_message(stream):
+    head = stream.read(4)
+    if len(head) < 4:
+        return None
+    size = struct.unpack("<I", head)[0]
+    if size > MAX_BROWSER_MESSAGE:
+        return None
+    body = stream.read(size)
+    if len(body) < size:
+        return None
+    try:
+        message = json.loads(body.decode("utf-8"))
+    except ValueError:
+        return {}
+    return message if isinstance(message, dict) else {}
+
+
+def from_side_profile():
+    # A browser started on its own profile dir (a web app popover, a test
+    # profile) is not where the user browses; only the main profile gets to
+    # drive the bar indicator. The browser is this process's parent.
+    if os.environ.get("OMANERO_ANY_PROFILE"):
+        return False
+    try:
+        with open("/proc/%d/cmdline" % os.getppid(), "rb") as handle:
+            return b"--user-data-dir=" in handle.read()
+    except OSError:
+        return False
+
+
+def native_host():
+    # Started by the browser for extension/background.js and kept running while
+    # the front tab shows a Monero address. Everything it is told comes from a
+    # web page: it can light the bar indicator and fill in the send form, and
+    # nothing more.
+    os.umask(0o077)
+    last_tip = 0.0
+    try:
+        while True:
+            message = read_browser_message(sys.stdin.buffer)
+            if message is None:
+                break
+            cfg = load_config()
+            if message.get("type") == "page":
+                write_watched("page.json", {"pid": os.getpid(), "items": page_items(message.get("items"), cfg["network"])})
+            elif message.get("type") == "tip" and time.time() - last_tip >= 1:
+                items = page_items([message], cfg["network"])
+                if not items:
+                    continue
+                last_tip = time.time()
+                where = "their X bio" if items[0]["source"] == "bio" else "a post on X"
+                post_request({"address": items[0]["address"], "amount": "",
+                              "recipient": "@" + items[0]["handle"] if items[0]["handle"] else "",
+                              "description": "address found in %s, not verified" % where})
+    except (Fail, OSError):
+        pass
+    finally:
+        page = read_json(state_path("page.json"), {}) or {}
+        if page.get("pid") == os.getpid():
+            try:
+                write_watched("page.json", {})
+            except (Fail, OSError):
+                pass
+    return 0
+
+
+# ----- Command line ----------------------------------------------------------
+
+LOCKED_COMMANDS = {
+    "create": cmd_create, "restore": cmd_restore, "unlock": cmd_unlock, "lock": cmd_lock,
+    "preview": cmd_preview, "relay": cmd_relay, "history": cmd_history, "uri": cmd_uri,
+    "dismiss": cmd_dismiss, "config": cmd_config, "seed": cmd_seed, "open": cmd_open,
+}
+
+
+def stdin_json():
+    line = sys.stdin.readline(1024 * 1024)
+    try:
+        data = json.loads(line) if line.strip() else {}
+    except ValueError:
+        raise Fail("Unreadable input")
+    if not isinstance(data, dict):
+        raise Fail("Unreadable input")
+    return data
+
+
+def ask(prompt, secret=False):
+    return getpass.getpass(prompt) if secret else input(prompt)
+
+
+def new_password():
+    first = ask("Wallet password: ", True)
+    if ask("Repeat it: ", True) != first:
+        raise Fail("The passwords do not match")
+    return first
+
+
+def gather(args):
+    # The panel pipes one JSON line; a person at a terminal is prompted.
+    if args.json and not sys.stdin.isatty() and args.command in (
+            "create", "restore", "unlock", "preview", "relay"):
+        return stdin_json()
+    command = args.command
+    if command == "create":
+        return {"password": new_password()}
+    if command == "restore":
+        seed = ask("25-word seed: ", True)
+        height = ask("Restore height (block number or YYYY-MM-DD): ")
+        return {"seed": seed, "restoreHeight": height, "password": new_password()}
+    if command == "unlock":
+        return {"password": ask("Wallet password: ", True)}
+    if command == "preview":
+        return {"address": args.address, "amount": args.amount}
+    if command == "relay":
+        return {"id": args.id}
+    if command in ("uri", "open"):
+        return {"uri": args.uri}
+    if command == "config":
+        # The panel saves several settings at once as {"set": {...}}.
+        if args.action == "apply":
+            return stdin_json()
+        if args.action == "set":
+            if not args.key or args.value is None:
+                raise Fail("Usage: omanero config set <network|node|autoLockMinutes|rpcPort> <value>")
+            return {"set": {args.key: args.value}}
+        return {}
+    return {}
+
+
+def with_lock(blocking):
+    private_dir(state_dir())
+    handle = open(state_path("lock"), "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
+    except OSError:
+        handle.close()
+        return None
+    return handle
+
+
+def run(args):
+    cfg = load_config()
+    command = args.command
+    if command == "status":
+        lock = with_lock(False)
+        if lock is None:
+            # Another command is mid-flight; report without touching the service.
+            out = base_status(cfg)
+            last = (read_json(state_path("session.json"), {}) or {}).get("last") or {}
+            if rpc_pid():
+                out.update(last)
+                out.update({"unlocked": bool(last), "busy": True,
+                            "address": out["address"] or out["knownAddress"]})
+            return out
+        with lock:
+            return status(cfg, args.active)
+    if command == "send":
+        return interactive_send(cfg, args)
+    if command == "qr":
+        return cmd_qr(cfg)
+    data = gather(args)
+    lock = with_lock(True)
+    with lock:
+        result = LOCKED_COMMANDS[command](cfg, data)
+    if command == "seed" and not args.json:
+        if not sys.stdout.isatty() or ask("Show the seed on screen? Type yes: ").strip().lower() != "yes":
+            raise Fail("Not shown")
+    return result
+
+
+def interactive_send(cfg, args):
+    if args.json or not sys.stdin.isatty():
+        raise Fail("send is for the terminal; the panel uses preview and relay")
+    with with_lock(True):
+        preview = cmd_preview(cfg, {"address": args.address, "amount": args.amount})
+    print("To:     %s" % preview["address"])
+    print("Amount: %s XMR" % preview["amount"])
+    print("Fee:    %s XMR" % preview["fee"])
+    print("Total:  %s XMR" % preview["total"])
+    if ask("Send it? Type yes: ").strip().lower() != "yes":
+        with with_lock(True):
+            remove(state_path("pending.json"))
+        raise Fail("Not sent")
+    with with_lock(True):
+        return cmd_relay(cfg, {"id": preview["id"]})
+
+
+def print_human(command, result):
+    if command == "status":
+        if not result["installed"]:
+            print("monero-wallet-rpc is not installed. Install it with: sudo pacman -S monero")
+        elif not result["walletExists"]:
+            print("No wallet yet. Run: omanero create   or   omanero restore")
+        elif not result["unlocked"]:
+            print("Locked. Run: omanero unlock")
+        else:
+            print("Balance:   %s XMR (%s spendable)" % (result["balance"], result["unlockedBalance"]))
+            print("Address:   %s" % result["address"])
+            state = "synced" if result["synced"] else ("syncing" if result["nodeReachable"] else "node unreachable")
+            print("Height:    %d of %d (%s)" % (result["height"], result["daemonHeight"], state))
+        print("Node:      %s (%s)" % (result["node"], result["network"]))
+        return
+    if command == "history":
+        for row in result["transfers"]:
+            when = datetime.datetime.fromtimestamp(row["timestamp"]).strftime("%Y-%m-%d %H:%M")
+            print("%s  %s%s XMR  %s" % (when, "+" if row["incoming"] else "-", row["amount"], row["kind"]))
+        return
+    if command == "qr":
+        # Black on white whatever the terminal theme, or phones will not read it.
+        for row in result["rows"]:
+            print("\033[47;30m" + "".join("\u2588\u2588" if cell == "1" else "  " for cell in row) + "\033[0m")
+        print(result["address"])
+        return
+    if command in ("create", "seed"):
+        print("Write these 25 words down and keep them offline. Anyone who has them has the money.")
+        print()
+        print(result["seed"])
+        print()
+        print("Restore height: %d" % result["restoreHeight"])
+        return
+    for key, value in result.items():
+        print("%s: %s" % (key, json.dumps(value) if isinstance(value, (dict, list)) else value))
+    if not result:
+        print("ok")
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="omanero", description="A small hot Monero wallet for Omarchy.")
+    parser.add_argument("--json", action="store_true", help="machine output; secrets are read as one JSON line on stdin")
+    sub = parser.add_subparsers(dest="command", required=True)
+    status_cmd = sub.add_parser("status", help="balance, address and sync state")
+    status_cmd.add_argument("--active", action="store_true", help=argparse.SUPPRESS)
+    sub.add_parser("create", help="create a new wallet and show its seed")
+    sub.add_parser("restore", help="restore a wallet from a 25-word seed and a restore height")
+    sub.add_parser("unlock", help="open the wallet")
+    sub.add_parser("lock", help="close the wallet and stop the wallet service")
+    send = sub.add_parser("send", help="review and send a payment from the terminal")
+    send.add_argument("address")
+    send.add_argument("amount")
+    preview = sub.add_parser("preview", help=argparse.SUPPRESS)
+    preview.add_argument("address", nargs="?", default="")
+    preview.add_argument("amount", nargs="?", default="")
+    relay = sub.add_parser("relay", help=argparse.SUPPRESS)
+    relay.add_argument("--id", default="")
+    sub.add_parser("history", help="recent transfers")
+    sub.add_parser("qr", help="show the wallet address as a QR code")
+    sub.add_parser("seed", help="show the seed of the unlocked wallet")
+    uri = sub.add_parser("uri", help="open a monero: link in the panel")
+    uri.add_argument("uri")
+    opener = sub.add_parser("open", help="open the panel, optionally with a monero: link")
+    opener.add_argument("uri", nargs="?", default="")
+    sub.add_parser("dismiss", help=argparse.SUPPRESS)
+    config = sub.add_parser("config", help="show or change the node, network and auto-lock")
+    config.add_argument("action", nargs="?", choices=["show", "set", "apply"], default="show")
+    config.add_argument("key", nargs="?")
+    config.add_argument("value", nargs="?")
+    return parser
+
+
+def main():
+    # The browser starts a native messaging host with the calling extension as
+    # its first argument.
+    if len(sys.argv) > 1 and sys.argv[1].startswith("chrome-extension://"):
+        return native_host() if sys.argv[1] == EXTENSION_ORIGIN and not from_side_profile() else 1
+    args = build_parser().parse_args()
+    os.umask(0o077)
+    try:
+        result = run(args)
+    except Fail as error:
+        if args.json:
+            print(json.dumps({"ok": False, "error": str(error)}))
+        else:
+            print("omanero: %s" % error, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+    if args.json:
+        result = dict(result)
+        result["ok"] = True
+        print(json.dumps(result))
+    else:
+        print_human(args.command, result)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
