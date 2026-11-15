@@ -10,7 +10,7 @@
 set -u
 T=$(mktemp -d)
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
-EXT=$ROOT/extension
+EXT=$ROOT/extension/x
 CLI=$ROOT/bin/omanero
 NODE=${NODE:-node}
 BROWSER=${BROWSER:-/opt/brave-bin/brave}

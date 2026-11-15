@@ -109,7 +109,7 @@ Stagenet (play money) is a switch in Settings and has its own wallet.
 
 ## Tipping on X
 
-omanero ships a small browser extension, in `extension/`, for Brave, Chromium,
+omanero ships a small browser extension, in `extension/x/`, for Brave, Chromium,
 Chrome, Vivaldi and Edge. It only reads x.com pages: it makes no network
 requests and holds no keys. The one thing it stores is the list of handles it
 has seen with an address.
@@ -234,7 +234,7 @@ Service.qml        Polls status and runs one command at a time for the panel
 Panel.qml          The panel
 BarWidget.qml      The bar icon
 Model.js           Checks and formats what the tool prints before it is shown
-extension/         The browser extension for X (plain JavaScript, no build step)
+extension/x/       The browser extension for X (plain JavaScript, no build step)
 tests/             test_cli.py (against a fake wallet service), model.test.js, detect.test.js
 ```
 

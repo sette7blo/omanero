@@ -7,6 +7,8 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The browser extension lives in `extension/x/` so its `manifest.json` is not
+  a second plugin manifest next to the Omarchy one.
 - Installing is one command: `omarchy plugin add https://github.com/sette7blo/omanero.git --enable`.
   The first time the plugin loads it installs `monero-wallet-rpc`, `python3`,
   `qrencode`, and `wl-clipboard` if they are missing, then links the command,

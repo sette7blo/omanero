@@ -16,7 +16,7 @@ PLUGIN_LINK="$CONFIG_HOME/omarchy/plugins/$PLUGIN_ID"
 CLI_LINK="$HOME/.local/bin/omanero"
 DESKTOP_LINK="$DATA_HOME/applications/omanero.desktop"
 SCHEME="x-scheme-handler/monero"
-# Fixed by the "key" in extension/manifest.json.
+# Fixed by the "key" in extension/x/manifest.json.
 EXTENSION_ID="lkdojiemjmekaibbklkoheninffafick"
 BROWSER_DIRS=(BraveSoftware/Brave-Browser chromium google-chrome vivaldi microsoft-edge)
 # Same flag files Omarchy uses for its own Chromium extensions.
@@ -142,7 +142,7 @@ setup_complete() {
   for name in "${FLAG_FILES[@]}"; do
     file="$CONFIG_HOME/$name"
     [[ -f $file ]] || continue
-    grep -qF -- "$PROJECT_DIR/extension" "$file" || return 1
+    grep -qF -- "$PROJECT_DIR/extension/x" "$file" || return 1
   done
   return 0
 }
@@ -186,22 +186,28 @@ register_links() {
   fi
 }
 
-# Adds extension/ to the browser's --load-extension line, next to the ones
-# Omarchy loads the same way. Takes effect the next time the browser starts.
+# Adds extension/x to the browser's --load-extension line, next to the ones
+# Omarchy loads the same way. The Chrome manifest stays one level below
+# extension/ so the marketplace sees a single plugin manifest at the repo root.
+# Takes effect the next time the browser starts.
 load_extension() {
-  local name file ext="$PROJECT_DIR/extension" loaded=false
+  local name file ext="$PROJECT_DIR/extension/x" old="$PROJECT_DIR/extension" loaded=false
   for name in "${FLAG_FILES[@]}"; do
     file="$CONFIG_HOME/$name"
     [[ -f "$file" ]] || continue
     loaded=true
     if grep -qF -- "$ext" "$file"; then
       continue
+    elif grep -qF -- "$old" "$file"; then
+      sed -i --follow-symlinks "s|$old|$ext|g" "$file"
+      log "extension path updated in $file"
     elif grep -q '^--load-extension=' "$file"; then
       sed -i --follow-symlinks "0,/^--load-extension=/s|^--load-extension=.*|&,$ext|" "$file"
+      log "extension added to $file"
     else
       printf -- '--load-extension=%s\n' "$ext" >> "$file"
+      log "extension added to $file"
     fi
-    log "extension added to $file"
   done
   if $loaded; then
     log "restart the browser once and the Tip controls appear on X"

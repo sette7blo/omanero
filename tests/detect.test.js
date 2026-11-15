@@ -1,6 +1,6 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
-const D = require("../extension/detect.js")
+const D = require("../extension/x/detect.js")
 
 const MAIN = "4A" + "b".repeat(93)
 const SUB = "8B" + "c".repeat(93)
