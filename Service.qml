@@ -3,10 +3,11 @@ import Quickshell
 import Quickshell.Io
 import "Model.js" as Model
 
-// Background service: the only thing here that runs bin/omanero. It polls
-// the wallet's status and runs one command at a time for the panel. Secrets
-// go to the command on stdin as a single JSON line and are dropped as soon
-// as they are written.
+// Background service. On load it runs install.sh, which finishes anything
+// omarchy plugin add does not: wallet tools, the command, monero: links, and
+// the X extension. It also polls the wallet and runs one command at a time
+// for the panel. Secrets go to the command on stdin as a single JSON line
+// and are dropped as soon as they are written.
 Item {
   id: root
 
@@ -14,7 +15,8 @@ Item {
   property bool panelOpen: false
 
   readonly property string home: Quickshell.env("HOME") || ""
-  readonly property string cli: home + "/.config/omarchy/plugins/" + Model.PLUGIN_ID + "/bin/omanero"
+  readonly property string pluginDir: home + "/.config/omarchy/plugins/" + Model.PLUGIN_ID
+  readonly property string cli: pluginDir + "/bin/omanero"
   readonly property string stateDir: home + "/.local/state/omarchy/omanero/"
 
   // --- State exposed to the widget and the panel ---------------------------
@@ -206,7 +208,19 @@ Item {
   }
 
   // --- Lifecycle -----------------------------------------------------------
-  Component.onCompleted: root.refresh()
+  // install.sh --if-needed exits at once when this machine is already set up.
+  // A missing package opens a terminal for the password, then the installer
+  // finishes there. The status timer picks up the new tools.
+  Process {
+    id: installProc
+    running: false
+  }
+
+  Component.onCompleted: {
+    installProc.command = [root.pluginDir + "/install.sh", "--if-needed"]
+    installProc.running = true
+    root.refresh()
+  }
   onPanelOpenChanged: if (root.panelOpen) root.refresh()
 
   Timer {

@@ -13,28 +13,31 @@ what you would keep in a pocket, and keep the 25-word seed on paper.
 
 ## Requirements
 
-- Omarchy **Quattro** (v4.5+) with the plugin runtime
-- `monero-wallet-rpc` on your `PATH`: `sudo pacman -S monero`, or without
-  root, the one file from the signed release at
-  [getmonero.org/downloads](https://www.getmonero.org/downloads/) placed in
-  `~/.local/bin`
-- `python3`
-- `wl-clipboard` for the Copy address button (ships with Omarchy)
-- `qrencode` for the QR code on the Receive tab (ships with Omarchy)
+Omarchy **Quattro** (v4.5+) with the plugin runtime.
 
 ## Install
 
 ```sh
-git clone https://github.com/sette7blo/omanero
-cd omanero
-./install.sh
+omarchy plugin add https://github.com/sette7blo/omanero.git --enable
 ```
 
-`install.sh` links the plugin, the `omanero` command and a launcher, and makes
-omanero the handler for `monero:` links unless another wallet already is
-(`--take-links` overrides that). It never creates or touches a wallet.
+That is the only command. The first time the plugin loads, it installs
+`monero-wallet-rpc`, `python3`, `qrencode`, and `wl-clipboard` if any of them
+are missing. A terminal opens for your password when a package has to be
+installed. It also links the `omanero` command and a launcher, makes omanero
+the handler for `monero:` links unless another wallet already is, and adds the
+X extension to the browser flags Omarchy already uses. Restart the browser
+once and the Tip controls appear.
 
-`./uninstall.sh` reverses it and **leaves your wallet files alone**.
+It never creates or touches a wallet.
+
+To remove it, run the uninstaller in the plugin folder, then remove the plugin.
+The uninstaller leaves your wallet files and the `monero` package alone.
+
+```sh
+~/.config/omarchy/plugins/io.github.sette7blo.omanero/uninstall.sh
+omarchy plugin remove io.github.sette7blo.omanero
+```
 
 ## Using it
 
@@ -110,12 +113,9 @@ Chrome, Vivaldi and Edge. It only reads x.com pages: it makes no network
 requests and holds no keys. The one thing it stores is the list of handles it
 has seen with an address.
 
-`install.sh` sets it up: on Omarchy it adds the extension to the browser's
-flags file (`~/.config/brave-flags.conf`, `chromium-flags.conf`), the same way
-Omarchy loads its own, and writes the link that lets it reach the wallet tool.
-Restart the browser once. Chrome and Edge ignore that flag; there, open the
-extensions page, turn on **Developer mode**, press **Load unpacked** and choose
-the `extension` folder of this project.
+The installer adds the extension to the browser flags files Omarchy already
+uses, including Chromium, Brave, Chrome, and Edge, and writes the link that
+lets it reach the wallet tool. Restart the browser once after installing.
 
 It works in your main browser profile, including Omarchy's web apps. A browser
 started on a profile of its own, such as a web app popover with a separate

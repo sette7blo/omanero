@@ -7,6 +7,11 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Installing is one command: `omarchy plugin add https://github.com/sette7blo/omanero.git --enable`.
+  The first time the plugin loads it installs `monero-wallet-rpc`, `python3`,
+  `qrencode`, and `wl-clipboard` if they are missing, then links the command,
+  the `monero:` handler, and the X extension. A terminal opens only for the
+  package password.
 - Several wallets: add another under a name, switch between them, and remove one from
   omanero (its files are moved to `removed/`, never deleted). In Settings, and as
   `omanero wallets`, `create --name`, `restore --name`, `use` and `forget`.

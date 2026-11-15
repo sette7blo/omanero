@@ -526,7 +526,7 @@ class Wallet(unittest.TestCase):
     def test_not_installed(self):
         env = dict(self.env, OMANERO_WALLET_RPC="/nonexistent/monero-wallet-rpc")
         self.assertFalse(self.run_cli("status", env=env)["installed"])
-        self.assertIn("pacman -S monero", self.run_cli("create", data={"password": "pw"}, env=env)["error"])
+        self.assertIn("not installed yet", self.run_cli("create", data={"password": "pw"}, env=env)["error"])
 
 
 if __name__ == "__main__":

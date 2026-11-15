@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Idempotent installer for the omanero Omarchy plugin.
-# Links the bar widget, the CLI and the launcher, offers omanero as the
-# handler for monero: links, and lets its browser extension reach the wallet. It never creates, opens or moves a wallet.
+# Installs monero-wallet-rpc when it is missing, links the bar widget, the CLI
+# and the launcher, offers omanero as the handler for monero: links, and lets
+# its browser extension reach the wallet. It never creates, opens or moves a wallet.
 
 set -euo pipefail
 
-PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PLUGIN_ID="io.github.sette7blo.omanero"
 TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
@@ -18,19 +19,32 @@ SCHEME="x-scheme-handler/monero"
 # Fixed by the "key" in extension/manifest.json.
 EXTENSION_ID="lkdojiemjmekaibbklkoheninffafick"
 BROWSER_DIRS=(BraveSoftware/Brave-Browser chromium google-chrome vivaldi microsoft-edge)
-# Launcher flag files that Omarchy already uses to load its own extensions.
-FLAG_FILES=(brave-flags.conf chromium-flags.conf)
+# Same flag files Omarchy uses for its own Chromium extensions.
+FLAG_FILES=(
+  chromium-flags.conf
+  chrome-flags.conf
+  google-chrome-flags.conf
+  brave-flags.conf
+  brave-beta-flags.conf
+  brave-nightly-flags.conf
+  brave-origin-flags.conf
+  brave-origin-beta-flags.conf
+  microsoft-edge-stable-flags.conf
+)
 
 ENABLE=true
 TAKE_LINKS=false
+IF_NEEDED=false
 
 usage() {
   cat <<USAGE
-Usage: $0 [--no-enable] [--take-links]
+Usage: $0 [--no-enable] [--take-links] [--if-needed]
 
 --no-enable   link everything but leave the bar widget for you to enable.
 --take-links  make omanero the handler for monero: links even if another
               wallet already is. Without it, an existing handler is kept.
+--if-needed   do nothing when the plugin is already set up. The bar service
+              runs the installer this way.
 USAGE
 }
 
@@ -38,6 +52,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-enable) ENABLE=false; shift ;;
     --take-links) TAKE_LINKS=true; shift ;;
+    --if-needed) IF_NEEDED=true; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
   esac
@@ -59,14 +74,86 @@ link_path() {
   ln -s "$source_path" "$target_path"
 }
 
-check_requirements() {
-  command -v python3 >/dev/null 2>&1 || log "python3 not found; the wallet tool needs it: sudo pacman -S python"
-  command -v monero-wallet-rpc >/dev/null 2>&1 \
-    || log "monero-wallet-rpc not found; install the wallet tools: sudo pacman -S monero"
-  command -v qrencode >/dev/null 2>&1 || log "qrencode not found; the Receive QR code needs it: sudo pacman -S qrencode"
+# Arch package names for the commands the wallet uses. A copy already on PATH,
+# including one placed in ~/.local/bin, counts as installed.
+missing_packages() {
+  local -a pkgs=()
+  command -v monero-wallet-rpc >/dev/null 2>&1 || pkgs+=(monero)
+  command -v python3 >/dev/null 2>&1 || pkgs+=(python)
+  command -v qrencode >/dev/null 2>&1 || pkgs+=(qrencode)
+  command -v wl-copy >/dev/null 2>&1 || pkgs+=(wl-clipboard)
+  if (( ${#pkgs[@]} )); then
+    printf '%s\n' "${pkgs[@]}"
+  fi
+}
+
+# sudo needs a terminal. From the shell, open one so the password can be typed.
+install_packages() {
+  local -a pkgs=()
+  mapfile -t pkgs < <(missing_packages)
+  (( ${#pkgs[@]} )) || return 0
+  if [[ -z ${OMANERO_INSTALL_FOREGROUND:-} && ( ! -t 0 || ! -t 1 ) ]] \
+    && command -v omarchy-launch-floating-terminal-with-presentation >/dev/null 2>&1; then
+    local quoted="" arg
+    quoted="$(printf '%q' "$0")"
+    local -a again=()
+    $IF_NEEDED && again+=(--if-needed)
+    $ENABLE || again+=(--no-enable)
+    $TAKE_LINKS && again+=(--take-links)
+    for arg in "${again[@]}"; do
+      quoted+=" $(printf '%q' "$arg")"
+    done
+    omarchy-launch-floating-terminal-with-presentation "OMANERO_INSTALL_FOREGROUND=1 $quoted"
+    exit 0
+  fi
+  log "installing packages: ${pkgs[*]}"
+  if command -v omarchy >/dev/null 2>&1; then
+    omarchy pkg add "${pkgs[@]}"
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --noconfirm --needed -- "${pkgs[@]}"
+  else
+    log "no package installer found"
+    exit 1
+  fi
+  hash -r
+  mapfile -t pkgs < <(missing_packages)
+  if (( ${#pkgs[@]} )); then
+    log "still missing after install: ${pkgs[*]}"
+    exit 1
+  fi
+}
+
+setup_complete() {
+  local name file dir current cli desktop
+  missing_packages | grep -q . && return 1
+  cli="$(readlink -f "$PROJECT_DIR/bin/omanero")"
+  [[ -L $CLI_LINK && "$(readlink -f "$CLI_LINK")" == "$cli" ]] || return 1
+  desktop="$(readlink -f "$PROJECT_DIR/omanero.desktop")"
+  [[ -e $desktop && -L $DESKTOP_LINK && "$(readlink -f "$DESKTOP_LINK")" == "$desktop" ]] || return 1
+  if command -v xdg-mime >/dev/null 2>&1; then
+    current="$(xdg-mime query default "$SCHEME" 2>/dev/null || true)"
+    [[ -n $current ]] || return 1
+  fi
+  for dir in "${BROWSER_DIRS[@]}"; do
+    [[ -d $CONFIG_HOME/$dir ]] || continue
+    file="$CONFIG_HOME/$dir/NativeMessagingHosts/$PLUGIN_ID.json"
+    [[ -f $file ]] && grep -qF -- "$cli" "$file" || return 1
+  done
+  for name in "${FLAG_FILES[@]}"; do
+    file="$CONFIG_HOME/$name"
+    [[ -f $file ]] || continue
+    grep -qF -- "$PROJECT_DIR/extension" "$file" || return 1
+  done
+  return 0
 }
 
 install_plugin_link() {
+  # omarchy plugin add already cloned this folder into the plugin directory.
+  # Linking it onto itself would move the checkout aside.
+  if [[ -e $PLUGIN_LINK || -L $PLUGIN_LINK ]] \
+    && [[ "$(readlink -f "$PLUGIN_LINK")" == "$PROJECT_DIR" ]]; then
+    return
+  fi
   link_path "$PROJECT_DIR" "$PLUGIN_LINK"
   log "linked plugin dir -> $PLUGIN_LINK"
 }
@@ -119,8 +206,7 @@ load_extension() {
   if $loaded; then
     log "restart the browser once and the Tip controls appear on X"
   else
-    log "to tip from X: open your browser's extensions page, turn on Developer mode,"
-    log "press Load unpacked and choose $ext"
+    log "no browser flags file found, so the Tip controls are not loaded"
   fi
 }
 
@@ -149,21 +235,40 @@ JSON
   fi
 }
 
+already_enabled() {
+  command -v omarchy >/dev/null 2>&1 || return 1
+  omarchy plugin list --json 2>/dev/null | python3 -c '
+import json, sys
+want = sys.argv[1]
+try:
+    plugins = json.load(sys.stdin)
+except json.JSONDecodeError:
+    sys.exit(1)
+sys.exit(0 if any(p.get("id") == want and p.get("enabled") is True for p in plugins) else 1)
+' "$PLUGIN_ID"
+}
+
 register_omarchy() {
   if ! command -v omarchy >/dev/null 2>&1; then
-    log "omarchy not found on PATH; skipping validate/enable"
+    log "omarchy not found on PATH; skipping enable"
     return
   fi
-  omarchy plugin validate "$PROJECT_DIR"
-  omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
-  if $ENABLE; then
+  # Rescanning from inside the running service reloads this installer.
+  if ! $IF_NEEDED; then
+    omarchy plugin validate "$PROJECT_DIR"
+    omarchy-shell shell rescanPlugins >/dev/null 2>&1 || true
+  fi
+  if $ENABLE && ! already_enabled; then
     omarchy plugin enable "$PLUGIN_ID" right >/dev/null 2>&1 || true
   fi
 }
 
 main() {
+  if $IF_NEEDED && setup_complete; then
+    exit 0
+  fi
+  install_packages
   log "plugin dir: $PROJECT_DIR"
-  check_requirements
   install_plugin_link
   install_cli
   install_desktop

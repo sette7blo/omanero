@@ -553,7 +553,7 @@ def start_rpc(cfg):
         return
     binary = find_binary()
     if not binary:
-        raise Fail("monero-wallet-rpc is not installed. Install it with: sudo pacman -S monero")
+        raise Fail("monero-wallet-rpc is not installed yet. The plugin installs it on first load; approve the password prompt if a terminal is open.")
     port = rpc_port(cfg)
     probe = socket.socket()
     # Without this a port the service just released still reads as taken.
@@ -1198,7 +1198,7 @@ def cmd_qr(cfg):
         proc = subprocess.run([tool, "--type", "ASCII", "--level", "M", "--margin", "4", "--output", "-"],
                               input="monero:" + address, capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
-        raise Fail("qrencode is not installed. Install it with: sudo pacman -S qrencode")
+        raise Fail("qrencode is not installed yet. The plugin installs it on first load.")
     # ASCII output is two characters per module.
     rows = ["".join("1" if "#" in line[i:i + 2] else "0" for i in range(0, len(line), 2))
             for line in proc.stdout.splitlines() if line]
@@ -1411,7 +1411,7 @@ def interactive_send(cfg, args):
 def print_human(command, result):
     if command == "status":
         if not result["installed"]:
-            print("monero-wallet-rpc is not installed. Install it with: sudo pacman -S monero")
+            print("monero-wallet-rpc is not installed yet. The plugin installs it on first load.")
         elif not result["walletExists"]:
             print("No wallet yet. Run: omanero create   or   omanero restore")
         elif not result["unlocked"]:

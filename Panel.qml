@@ -389,9 +389,8 @@ Panel {
         spacing: Style.spacing.lg
         visible: root.view === "missing"
 
-        Body { text: "Omanero needs the Monero wallet tools. Install them in a terminal with:" }
-        Body { text: "sudo pacman -S monero"; font.bold: true }
-        Note { text: "Only the wallet part is used. No blockchain is downloaded and no node runs on this computer." }
+        Body { text: "Omanero is installing the Monero wallet tools." }
+        Note { text: "A terminal opens if your password is needed. Only the wallet part is used. No blockchain is downloaded and no node runs on this computer." }
       }
 
       // ---- Create or restore ----
