@@ -49,6 +49,12 @@ Click the Monero icon on the bar.
 | Receive | Shows your address with a Copy button. |
 | History | Recent payments in and out. |
 
+![Send: an address, an amount, and Review before anything is sent](docs/send.png)
+
+![Receive: the wallet address, with Copy and a QR code](docs/receive.png)
+
+![History: a confirmed payment in](docs/history.png)
+
 Middle-click the bar icon to lock. Right-click opens this file.
 
 A new or restored wallet has to catch up with the network before it can send.
@@ -130,6 +136,10 @@ After that:
   address. Someone whose bio you have never had on screen gets no badge.
 - Either way you enter the amount, press Review, check it, press Send.
 
+![The bar icon in the accent colour while the front tab is an X profile with a Monero address](docs/x-bar.png)
+
+![Tip XMR under the bio, and an XMR badge on a post by someone whose address has been seen](docs/x-tip.png)
+
 **Nothing verifies these addresses.** Anyone can write any address in a post
 or a reply, and scammers do. The panel says where the address was seen; make
 sure it is the person you mean before the last press. omanero never sends on
@@ -146,6 +156,8 @@ the manifests already on disk; nothing is fetched.
 The address is whatever the installed copy says. A fork or a tampered copy
 can carry someone else's address, so the list shows where each plugin came
 from, and the send form says the address is not verified.
+
+![Plugins: installed plugins with a published address, where each one came from, and Tip](docs/plugins.png)
 
 ### For plugin authors
 
