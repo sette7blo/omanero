@@ -138,8 +138,6 @@ After that:
 
 ![The bar icon in the accent colour while the front tab is an X profile with a Monero address](docs/x-bar.png)
 
-![Tip XMR under the bio, and an XMR badge on a post by someone whose address has been seen](docs/x-tip.png)
-
 **Nothing verifies these addresses.** Anyone can write any address in a post
 or a reply, and scammers do. The panel says where the address was seen; make
 sure it is the person you mean before the last press. omanero never sends on
