@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.2.0] - 2026-11-15
+
 ### Added
 - The browser extension lives in `extension/x/` so its `manifest.json` is not
   a second plugin manifest next to the Omarchy one.
@@ -19,6 +21,10 @@ project uses [Semantic Versioning](https://semver.org/).
   `omanero wallets`, `create --name`, `restore --name`, `use` and `forget`.
 - Plugins tab: tip the authors of installed Omarchy plugins whose `manifest.json` has
   `"funding": { "monero": "<address>" }`. Also `omanero plugins` in a terminal.
+
+### Changed
+- The plugin's own manifest names a Monero address for tips, and `LICENSE` names
+  `sette7blo` as the copyright holder.
 
 ## [v0.1.0] - 2026-11-15
 
@@ -42,5 +48,6 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.2.0...HEAD
+[v0.2.0]: https://github.com/sette7blo/omanero/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/sette7blo/omanero/releases/tag/v0.1.0
