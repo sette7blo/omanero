@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Monero Wallet
+GenericName=Monero Wallet
+Comment=Open the Omanero panel, or pay a monero: link
+Exec=@@OMANERO_CLI@@ open %u
+Icon=wallet
+Terminal=false
+Categories=Finance;Network;
+Keywords=monero;xmr;wallet;omanero;tip;
+MimeType=x-scheme-handler/monero;
