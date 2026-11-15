@@ -58,7 +58,10 @@ NETWORKS = {
     },
 }
 
-DEFAULT_CONFIG = {"network": "mainnet", "node": "", "autoLockMinutes": 30, "rpcPort": 0}
+DEFAULT_CONFIG = {"network": "mainnet", "node": "", "autoLockMinutes": 30, "rpcPort": 0, "wallets": {}}
+MAX_WALLETS = 20
+# Where remove-wallet puts a wallet's files. Never a wallet name.
+REMOVED_DIR = "removed"
 MAX_AUTO_LOCK_MINUTES = 1440
 PENDING_MAX_AGE = 600
 REQUEST_MAX_AGE = 900
@@ -67,12 +70,17 @@ BLOCKS_PER_DAY = 720
 MAX_TEXT = 120
 MAX_HISTORY = 50
 MAX_PAGE_ITEMS = 5
+MAX_PLUGINS = 100
+MAX_MANIFEST_BYTES = 256 * 1024
 MAX_BROWSER_MESSAGE = 64 * 1024
 
 ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{95}$|^[1-9A-HJ-NP-Za-km-z]{106}$")
 AMOUNT_RE = re.compile(r"^\d{1,9}(\.\d{1,12})?$")
 NODE_RE = re.compile(r"^(https?://)?([A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(:(\d{1,5}))?$")
 HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
+WALLET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
+PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+HOMEPAGE_RE = re.compile(r"^https://[A-Za-z0-9.-]{1,100}(/[A-Za-z0-9._~/-]{0,150})?$")
 HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
 DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
@@ -189,6 +197,10 @@ def load_config():
         cfg["node"] = ""
     cfg["autoLockMinutes"] = clamp_int(raw.get("autoLockMinutes"), 0, MAX_AUTO_LOCK_MINUTES, 30)
     cfg["rpcPort"] = clamp_int(raw.get("rpcPort"), 0, 65535, 0)
+    # The wallet in use, per network. Absent means the first one, "omanero".
+    chosen = raw.get("wallets") if isinstance(raw.get("wallets"), dict) else {}
+    cfg["wallets"] = {net: name for net, name in chosen.items()
+                      if net in NETWORKS and isinstance(name, str) and WALLET_NAME_RE.match(name)}
     return cfg
 
 
@@ -209,12 +221,46 @@ def rpc_port(cfg):
     return cfg["rpcPort"] or NETWORKS[cfg["network"]]["rpcPort"]
 
 
+def wallet_name(cfg):
+    return cfg["wallets"].get(cfg["network"]) or WALLET_NAME
+
+
+def check_wallet_name(value):
+    name = str(value or "").strip().lower()
+    if not WALLET_NAME_RE.match(name) or name == REMOVED_DIR:
+        raise Fail("A wallet name is 1 to 24 lowercase letters, digits or dashes")
+    return name
+
+
+def with_wallet(cfg, name):
+    nxt = dict(cfg)
+    nxt["wallets"] = dict(cfg["wallets"])
+    nxt["wallets"][cfg["network"]] = name
+    return nxt
+
+
 def keys_path(cfg):
-    return os.path.join(wallet_dir(cfg["network"]), WALLET_NAME + ".keys")
+    return os.path.join(wallet_dir(cfg["network"]), wallet_name(cfg) + ".keys")
 
 
 def meta_path(cfg):
-    return os.path.join(wallet_dir(cfg["network"]), "meta.json")
+    # The first wallet keeps the file name it had before there could be several.
+    name = wallet_name(cfg)
+    return os.path.join(wallet_dir(cfg["network"]), "meta.json" if name == WALLET_NAME else name + ".meta.json")
+
+
+def list_wallets(cfg):
+    try:
+        files = os.listdir(wallet_dir(cfg["network"]))
+    except OSError:
+        files = []
+    names = sorted(name[:-5] for name in files
+                   if name.endswith(".keys") and WALLET_NAME_RE.match(name[:-5]) and name[:-5] != REMOVED_DIR)
+    out = []
+    for name in names[:MAX_WALLETS]:
+        meta = read_json(meta_path(with_wallet(cfg, name)), {}) or {}
+        out.append({"name": name, "address": str(meta.get("address") or "")})
+    return out
 
 
 # ----- Amounts, addresses, links -------------------------------------------
@@ -710,6 +756,8 @@ def base_status(cfg):
         "nodes": NETWORKS[cfg["network"]]["nodes"],
         "autoLockMinutes": cfg["autoLockMinutes"],
         "walletExists": os.path.exists(keys_path(cfg)),
+        "wallet": wallet_name(cfg),
+        "wallets": list_wallets(cfg),
         "restoreHeight": clamp_int(meta.get("restoreHeight"), 0, 10 ** 9, 0),
         "knownAddress": str(meta.get("address") or ""),
         "unlocked": False, "busy": False, "synced": False,
@@ -794,12 +842,23 @@ def write_meta(cfg, restore_height, address):
 
 def refuse_existing(cfg):
     if os.path.exists(keys_path(cfg)):
-        raise Fail("A wallet already exists in %s. Move it away first if you want to replace it."
-                   % wallet_dir(cfg["network"]))
+        raise Fail("A wallet named %s already exists. Choose another name to add a second wallet."
+                   % wallet_name(cfg))
+
+
+def new_wallet_config(cfg, data):
+    # A name asks for an additional wallet. It only becomes the one in use
+    # once it has been made, so a failed attempt leaves the current one alone.
+    if not data.get("name"):
+        return cfg
+    if len(list_wallets(cfg)) >= MAX_WALLETS:
+        raise Fail("There are already %d wallets. Remove one first." % MAX_WALLETS)
+    return with_wallet(cfg, check_wallet_name(data.get("name")))
 
 
 def cmd_create(cfg, data):
     password = check_password(data.get("password"))
+    cfg = new_wallet_config(cfg, data)
     refuse_existing(cfg)
     # The service asks the node for the current height when it creates a
     # wallet. Without an answer the new wallet would scan the whole chain.
@@ -812,7 +871,7 @@ def cmd_create(cfg, data):
     start_rpc(cfg)
     try:
         wallet_rpc("create_wallet",
-                   {"filename": WALLET_NAME, "password": password, "language": "English"}, timeout=120)
+                   {"filename": wallet_name(cfg), "password": password, "language": "English"}, timeout=120)
         seed = str(wallet_rpc("query_key", {"key_type": "mnemonic"}, timeout=30).get("key", ""))
         address = open_address()
         if not seed or not address:
@@ -822,6 +881,7 @@ def cmd_create(cfg, data):
         raise Fail("Could not create the wallet: %s" % error)
     height = creation_height(cfg)
     write_meta(cfg, height, address)
+    save_config(cfg)
     touch_session()
     return {"seed": seed, "address": address, "restoreHeight": height}
 
@@ -829,13 +889,14 @@ def cmd_create(cfg, data):
 def cmd_restore(cfg, data):
     password = check_password(data.get("password"))
     seed = check_seed(data.get("seed"))
+    cfg = new_wallet_config(cfg, data)
     refuse_existing(cfg)
     height = resolve_height(data.get("restoreHeight"), active_node(cfg))
     stop_rpc()
     start_rpc(cfg)
     try:
         result = wallet_rpc("restore_deterministic_wallet", {
-            "filename": WALLET_NAME, "password": password, "seed": seed,
+            "filename": wallet_name(cfg), "password": password, "seed": seed,
             "restore_height": height, "language": "English"}, timeout=300)
     except RpcError as error:
         stop_rpc()
@@ -845,6 +906,7 @@ def cmd_restore(cfg, data):
         raise Fail("Could not restore: %s" % error)
     address = str(result.get("address", ""))
     write_meta(cfg, height, address)
+    save_config(cfg)
     touch_session()
     return {"address": address, "restoreHeight": height}
 
@@ -863,7 +925,7 @@ def cmd_unlock(cfg, data):
         stop_rpc()
     start_rpc(cfg)
     try:
-        wallet_rpc("open_wallet", {"filename": WALLET_NAME, "password": password}, timeout=120)
+        wallet_rpc("open_wallet", {"filename": wallet_name(cfg), "password": password}, timeout=120)
     except RpcError:
         stop_rpc()
         raise Fail("Wrong password")
@@ -1025,12 +1087,51 @@ def cmd_config(cfg, data):
         nxt["autoLockMinutes"] = clamp_int(changes["autoLockMinutes"], 0, MAX_AUTO_LOCK_MINUTES, 30)
     if "rpcPort" in changes:
         nxt["rpcPort"] = clamp_int(changes["rpcPort"], 0, 65535, 0)
-    restart = any(nxt[k] != cfg[k] for k in ("network", "node", "rpcPort"))
-    # The service reads its node and network at start, so these lock the wallet.
+    if "wallet" in changes:
+        name = check_wallet_name(changes["wallet"])
+        nxt = with_wallet(nxt, name)
+        if not os.path.exists(keys_path(nxt)):
+            raise Fail("There is no wallet named %s" % name)
+    restart = any(nxt[k] != cfg[k] for k in ("network", "node", "rpcPort")) or wallet_name(nxt) != wallet_name(cfg)
+    # The service reads its node and network at start, and holds one wallet
+    # open, so these lock the wallet.
     if restart:
         stop_rpc()
     save_config(nxt)
     return {"config": nxt, "locked": restart}
+
+
+def cmd_wallets(cfg, data):
+    return {"wallet": wallet_name(cfg), "wallets": list_wallets(cfg)}
+
+
+def cmd_forget(cfg, data):
+    # Takes a wallet out of omanero without destroying anything: its files are
+    # moved aside, where the seed on paper or the files themselves still give
+    # the money back.
+    name = check_wallet_name(data.get("name") or wallet_name(cfg))
+    target = with_wallet(cfg, name)
+    if not os.path.exists(keys_path(target)):
+        raise Fail("There is no wallet named %s" % name)
+    if name == wallet_name(cfg):
+        stop_rpc()
+    folder = wallet_dir(cfg["network"])
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    dest = os.path.join(folder, REMOVED_DIR, "%s-%s" % (name, stamp))
+    if os.path.exists(dest):
+        raise Fail("Try again in a second")
+    os.makedirs(dest, mode=0o700)
+    os.chmod(os.path.join(folder, REMOVED_DIR), 0o700)
+    for path in (keys_path(target), keys_path(target)[:-5], meta_path(target),
+                 keys_path(target)[:-5] + ".address.txt"):
+        if os.path.exists(path):
+            os.rename(path, os.path.join(dest, os.path.basename(path)))
+    nxt = cfg
+    if name == wallet_name(cfg):
+        left = [item["name"] for item in list_wallets(cfg)]
+        nxt = with_wallet(cfg, left[0] if left else WALLET_NAME)
+        save_config(nxt)
+    return {"removed": name, "movedTo": dest, "wallet": wallet_name(nxt)}
 
 
 def cmd_seed(cfg, data):
@@ -1040,6 +1141,48 @@ def cmd_seed(cfg, data):
     except (RpcDown, RpcError):
         raise Fail("The wallet is busy syncing. Try again in a moment.")
     return {"seed": seed, "restoreHeight": base_status(cfg)["restoreHeight"]}
+
+
+def cmd_plugins(cfg):
+    # Installed Omarchy plugins whose manifest names a Monero address for tips:
+    # "funding": {"monero": "<address>"}. Read from disk only; a manifest is
+    # whatever its author wrote, so every field is checked like page content.
+    root = os.path.join(config_dir(), os.pardir, "omarchy", "plugins")
+    found = []
+    try:
+        names = sorted(os.listdir(root))
+    except OSError:
+        names = []
+    for name in names:
+        if name.startswith(".") or len(found) >= MAX_PLUGINS:
+            continue
+        path = os.path.join(root, name, "manifest.json")
+        try:
+            if os.path.getsize(path) > MAX_MANIFEST_BYTES:
+                continue
+        except OSError:
+            continue
+        manifest = read_json(path, {})
+        if not isinstance(manifest, dict):
+            continue
+        funding = manifest.get("funding")
+        plugin_id = str(manifest.get("id") or "")
+        try:
+            address = check_address(funding.get("monero") if isinstance(funding, dict) else "", cfg["network"])
+        except Fail:
+            continue
+        # The same plugin can be reachable through two folders, one a link.
+        if not PLUGIN_ID_RE.match(plugin_id) or any(item["id"] == plugin_id for item in found):
+            continue
+        homepage = str(manifest.get("homepage") or "")
+        found.append({
+            "id": plugin_id, "name": clean_text(manifest.get("name")) or plugin_id,
+            "author": clean_text(manifest.get("author")),
+            "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
+            "address": address,
+        })
+    found.sort(key=lambda item: item["name"].lower())
+    return {"plugins": found}
 
 
 def cmd_qr(cfg):
@@ -1138,6 +1281,7 @@ LOCKED_COMMANDS = {
     "create": cmd_create, "restore": cmd_restore, "unlock": cmd_unlock, "lock": cmd_lock,
     "preview": cmd_preview, "relay": cmd_relay, "history": cmd_history, "uri": cmd_uri,
     "dismiss": cmd_dismiss, "config": cmd_config, "seed": cmd_seed, "open": cmd_open,
+    "wallets": cmd_wallets, "forget": cmd_forget,
 }
 
 
@@ -1166,15 +1310,24 @@ def new_password():
 def gather(args):
     # The panel pipes one JSON line; a person at a terminal is prompted.
     if args.json and not sys.stdin.isatty() and args.command in (
-            "create", "restore", "unlock", "preview", "relay"):
+            "create", "restore", "unlock", "preview", "relay", "forget"):
         return stdin_json()
     command = args.command
     if command == "create":
-        return {"password": new_password()}
+        return {"password": new_password(), "name": args.name}
     if command == "restore":
         seed = ask("25-word seed: ", True)
         height = ask("Restore height (block number or YYYY-MM-DD): ")
-        return {"seed": seed, "restoreHeight": height, "password": new_password()}
+        return {"seed": seed, "restoreHeight": height, "password": new_password(), "name": args.name}
+    if command == "use":
+        return {"set": {"wallet": args.name}}
+    if command == "forget":
+        name = check_wallet_name(args.name or wallet_name(load_config()))
+        print("This takes the wallet %s out of omanero. Its files are moved aside, not deleted," % name)
+        print("but you need its 25-word seed or those files to reach the money again.")
+        if ask("Type the wallet's name to go on: ").strip().lower() != name:
+            raise Fail("Not removed")
+        return {"name": name}
     if command == "unlock":
         return {"password": ask("Wallet password: ", True)}
     if command == "preview":
@@ -1226,10 +1379,12 @@ def run(args):
         return interactive_send(cfg, args)
     if command == "qr":
         return cmd_qr(cfg)
+    if command == "plugins":
+        return cmd_plugins(cfg)
     data = gather(args)
     lock = with_lock(True)
     with lock:
-        result = LOCKED_COMMANDS[command](cfg, data)
+        result = LOCKED_COMMANDS["config" if command == "use" else command](cfg, data)
     if command == "seed" and not args.json:
         if not sys.stdout.isatty() or ask("Show the seed on screen? Type yes: ").strip().lower() != "yes":
             raise Fail("Not shown")
@@ -1273,6 +1428,26 @@ def print_human(command, result):
             when = datetime.datetime.fromtimestamp(row["timestamp"]).strftime("%Y-%m-%d %H:%M")
             print("%s  %s%s XMR  %s" % (when, "+" if row["incoming"] else "-", row["amount"], row["kind"]))
         return
+    if command == "wallets":
+        for item in result["wallets"]:
+            print("%s %s  %s" % ("*" if item["name"] == result["wallet"] else " ", item["name"], item["address"]))
+        if not result["wallets"]:
+            print("No wallet yet. Run: omanero create   or   omanero restore")
+        return
+    if command == "forget":
+        print("Removed %s. Its files are in %s" % (result["removed"], result["movedTo"]))
+        return
+    if command == "use":
+        print("Now using %s. Run: omanero unlock" % wallet_name(result["config"]))
+        return
+    if command == "plugins":
+        for item in result["plugins"]:
+            print("%s%s" % (item["name"], " by " + item["author"] if item["author"] else ""))
+            print("  %s" % (item["homepage"] or item["id"]))
+            print("  %s" % item["address"])
+        if not result["plugins"]:
+            print("None of the installed plugins lists a Monero address.")
+        return
     if command == "qr":
         # Black on white whatever the terminal theme, or phones will not read it.
         for row in result["rows"]:
@@ -1298,8 +1473,15 @@ def build_parser():
     sub = parser.add_subparsers(dest="command", required=True)
     status_cmd = sub.add_parser("status", help="balance, address and sync state")
     status_cmd.add_argument("--active", action="store_true", help=argparse.SUPPRESS)
-    sub.add_parser("create", help="create a new wallet and show its seed")
-    sub.add_parser("restore", help="restore a wallet from a 25-word seed and a restore height")
+    create = sub.add_parser("create", help="create a new wallet and show its seed")
+    create.add_argument("--name", default="", help="add it as another wallet under this name")
+    restore = sub.add_parser("restore", help="restore a wallet from a 25-word seed and a restore height")
+    restore.add_argument("--name", default="", help="add it as another wallet under this name")
+    sub.add_parser("wallets", help="list the wallets; * marks the one in use")
+    use = sub.add_parser("use", help="switch to another wallet")
+    use.add_argument("name")
+    forget = sub.add_parser("forget", help="take a wallet out of omanero; its files are moved aside, not deleted")
+    forget.add_argument("name", nargs="?", default="", help="defaults to the wallet in use")
     sub.add_parser("unlock", help="open the wallet")
     sub.add_parser("lock", help="close the wallet and stop the wallet service")
     send = sub.add_parser("send", help="review and send a payment from the terminal")
@@ -1312,6 +1494,7 @@ def build_parser():
     relay.add_argument("--id", default="")
     sub.add_parser("history", help="recent transfers")
     sub.add_parser("qr", help="show the wallet address as a QR code")
+    sub.add_parser("plugins", help="installed Omarchy plugins whose author can be tipped")
     sub.add_parser("seed", help="show the seed of the unlocked wallet")
     uri = sub.add_parser("uri", help="open a monero: link in the panel")
     uri.add_argument("uri")

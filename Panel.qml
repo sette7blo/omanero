@@ -24,6 +24,9 @@ Panel {
   property bool copied: false
   property bool showQr: false
   property var pickedTip: null
+  // Adding another wallet next to the ones that exist.
+  property bool addingWallet: false
+  property bool confirmRemove: false
   property string appliedRequest: ""
 
   // Settings draft, filled when the settings view opens.
@@ -53,7 +56,7 @@ Panel {
     if (!st.installed) return "missing"
     if (seedInfo) return "seed"
     if (showSettings) return "settings"
-    if (!st.walletExists) return "setup"
+    if (!st.walletExists || addingWallet) return "setup"
     if (!st.unlocked) return "locked"
     return "wallet"
   }
@@ -61,7 +64,7 @@ Panel {
   readonly property bool typing: seedField.activeFocus || heightField.activeFocus
     || newPassField.activeFocus || repeatPassField.activeFocus || unlockField.activeFocus
     || addressField.activeFocus || amountField.activeFocus || nodeField.activeFocus
-    || lockField.field.activeFocus
+    || lockField.field.activeFocus || nameField.activeFocus
 
   readonly property string busyText: {
     if (!busy || !service) return ""
@@ -73,6 +76,7 @@ Panel {
     if (kind === "preview") return "Building the transaction"
     if (kind === "relay") return "Sending"
     if (kind === "config") return "Saving"
+    if (kind === "forget") return "Removing the wallet"
     return ""
   }
 
@@ -100,9 +104,27 @@ Panel {
       problem = Model.seedProblem(seedField.text) || (heightField.text.trim() === ""
         ? "Enter the restore height: a block number or a date." : "") || problem
     }
+    var name = root.addingWallet ? nameField.text.trim().toLowerCase() : ""
+    if (root.addingWallet) problem = Model.walletNameProblem(name, root.st.wallets) || problem
     if (problem !== "") { root.formError = problem; return }
-    if (root.setupMode === "restore") root.service.restore(seedField.text, newPassField.text, heightField.text)
-    else root.service.create(newPassField.text)
+    if (root.setupMode === "restore") root.service.restore(seedField.text, newPassField.text, heightField.text, name)
+    else root.service.create(newPassField.text, name)
+  }
+
+  function startAddWallet() {
+    clearMessages()
+    clearSecrets()
+    nameField.text = ""
+    root.setupMode = "create"
+    root.showSettings = false
+    root.addingWallet = true
+  }
+
+  function switchWallet(name) {
+    if (root.busy || !root.service || name === root.st.wallet) return
+    clearMessages()
+    root.resetSend()
+    root.service.saveConfig({ wallet: name })
   }
 
   function submitUnlock() {
@@ -157,6 +179,7 @@ Panel {
     nodeField.text = root.st.customNode
     lockField.value = root.st.autoLockMinutes
     clearMessages()
+    root.confirmRemove = false
     root.showSettings = true
   }
 
@@ -169,13 +192,24 @@ Panel {
     root.service.saveConfig(changes)
   }
 
+  // Read again each time the tab is shown: a plugin may have been installed
+  // or removed since.
+  function loadPluginsIfShown() {
+    if (root.opened && root.view === "wallet" && root.tab === "plugins" && root.service) root.service.loadPlugins()
+  }
+
+  function pickPlugin(item) {
+    root.tab = "send"
+    pickTip(item)
+  }
+
   function loadHistoryIfShown() {
     if (root.opened && root.view === "wallet" && root.tab === "history"
         && root.service && !root.service.transfersLoaded) root.service.loadHistory()
   }
 
   onRequestIdChanged: applyRequest()
-  onTabChanged: { clearMessages(); loadHistoryIfShown() }
+  onTabChanged: { clearMessages(); loadHistoryIfShown(); loadPluginsIfShown() }
   onViewChanged: { root.formError = ""; loadHistoryIfShown() }
   onSetupModeChanged: clearMessages()
 
@@ -187,6 +221,8 @@ Panel {
         root.showSettings = false
         root.copied = false
         root.showQr = false
+        root.addingWallet = false
+        root.confirmRemove = false
         root.clearSecrets()
       } else {
         root.applyRequest()
@@ -203,6 +239,8 @@ Panel {
       // typed for has run.
       if (kind === "create" || kind === "restore" || kind === "unlock") root.clearSecrets()
       if (kind === "restore" && ok) heightField.text = ""
+      if ((kind === "create" || kind === "restore") && ok) root.addingWallet = false
+      if (kind === "forget") { root.confirmRemove = false; if (ok) root.showSettings = false }
       if (kind === "relay" && ok) { addressField.text = ""; amountField.text = ""; root.pickedTip = null }
       if (kind === "config" && ok) root.showSettings = false
       if (kind === "dismiss") root.resetSend()
@@ -373,6 +411,19 @@ Panel {
         }
 
         Field {
+          label: "Name for this wallet"
+          visible: root.addingWallet
+          TextField {
+            id: nameField
+            width: parent.width
+            placeholderText: "tips"
+            foreground: root.foreground
+            accent: root.accent
+          }
+          Note { text: "Lowercase letters, digits and dashes. Your other wallets stay as they are; this one has its own seed and password." }
+        }
+
+        Field {
           label: "25-word seed"
           visible: root.setupMode === "restore"
           TextField {
@@ -425,6 +476,12 @@ Panel {
         PanelButton {
           text: root.setupMode === "restore" ? "Restore wallet" : "Create wallet"
           onClicked: root.submitSetup()
+        }
+
+        PanelButton {
+          visible: root.addingWallet
+          text: "Cancel"
+          onClicked: { root.clearMessages(); root.clearSecrets(); root.addingWallet = false }
         }
 
         Note { text: Model.networkLine(root.st) }
@@ -519,7 +576,8 @@ Panel {
           options: [
             { value: "send", label: "Send" },
             { value: "receive", label: "Receive" },
-            { value: "history", label: "History" }
+            { value: "history", label: "History" },
+            { value: "plugins", label: "Plugins" }
           ]
           value: root.tab
           fontSize: Style.font.bodySmall
@@ -553,10 +611,11 @@ Panel {
                 onClicked: root.pickTip(modelData)
               }
             }
-            Note {
-              visible: root.pickedTip !== null && addressField.text === root.pickedTip.address
-              text: root.pickedTip ? Model.tipNote(root.pickedTip) : ""
-            }
+          }
+
+          Note {
+            visible: root.request === null && root.pickedTip !== null && addressField.text === root.pickedTip.address
+            text: root.pickedTip ? Model.tipNote(root.pickedTip) : ""
           }
 
           Column {
@@ -800,6 +859,70 @@ Panel {
             onClicked: if (root.service) root.service.loadHistory()
           }
         }
+
+        // -- Plugins: tip the authors of what is installed
+        Column {
+          width: parent.width
+          spacing: Style.spacing.lg
+          visible: root.tab === "plugins"
+
+          ListView {
+            id: pluginList
+            width: parent.width
+            height: Math.min(contentHeight, Style.space(320))
+            visible: count > 0
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
+            model: root.service ? root.service.plugins : []
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+            delegate: Item {
+              required property var modelData
+              width: pluginList.width
+              implicitHeight: pluginRow.implicitHeight + Style.spacing.md * 2
+
+              RowLayout {
+                id: pluginRow
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                spacing: Style.spacing.lg
+
+                Column {
+                  Layout.fillWidth: true
+                  spacing: Style.spacing.xxs
+                  Text {
+                    textFormat: Text.PlainText
+                    width: parent.width
+                    text: modelData.name
+                    color: root.foreground
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.body
+                    elide: Text.ElideRight
+                  }
+                  FieldLabel {
+                    width: parent.width
+                    text: Model.pluginSubtitle(modelData)
+                    elide: Text.ElideMiddle
+                  }
+                }
+                PanelButton {
+                  text: "Tip"
+                  onClicked: root.pickPlugin(modelData)
+                }
+              }
+            }
+          }
+
+          Body {
+            visible: pluginList.count === 0
+            color: root.dim
+            text: root.service && root.service.pluginsLoaded
+              ? "None of your installed plugins lists a Monero address yet." : "Loading."
+          }
+          Note { text: "A plugin author can be tipped when the plugin's manifest.json has a line \"funding\": { \"monero\": \"address\" }." }
+        }
       }
 
       // ---- Settings ----
@@ -807,6 +930,74 @@ Panel {
         width: parent.width
         spacing: Style.spacing.xxl
         visible: root.view === "settings"
+
+        Field {
+          label: "Wallet"
+
+          Flow {
+            width: parent.width
+            spacing: Style.spacing.md
+            visible: root.st.wallets.length > 1
+
+            Repeater {
+              model: root.st.wallets
+
+              PanelButton {
+                required property var modelData
+                text: modelData.name
+                selected: modelData.name === root.st.wallet
+                onClicked: root.switchWallet(modelData.name)
+              }
+            }
+          }
+          Note {
+            visible: root.st.wallets.length > 1
+            text: "Pressing another wallet locks this one and switches. Each has its own password."
+          }
+
+          RowLayout {
+            width: parent.width
+            spacing: Style.spacing.lg
+            visible: !root.confirmRemove
+
+            PanelButton {
+              text: "Add a wallet"
+              onClicked: root.startAddWallet()
+            }
+            PanelButton {
+              visible: root.st.walletExists
+              text: "Remove this wallet"
+              onClicked: { root.clearMessages(); root.confirmRemove = true }
+            }
+            Item { Layout.fillWidth: true }
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.spacing.md
+            visible: root.confirmRemove
+
+            Body {
+              text: "Remove the wallet " + root.st.wallet + " from omanero?"
+            }
+            Note {
+              text: "Its files are moved aside, not deleted, but to reach the money again you need its 25-word seed. If you have not written the seed down, press Keep and do that first."
+            }
+            RowLayout {
+              width: parent.width
+              spacing: Style.spacing.lg
+              PanelButton {
+                text: "Keep"
+                onClicked: root.confirmRemove = false
+              }
+              Item { Layout.fillWidth: true }
+              PanelButton {
+                text: "Remove " + root.st.wallet
+                onClicked: if (root.service && !root.busy) root.service.removeWallet(root.st.wallet)
+              }
+            }
+          }
+        }
 
         Field {
           label: "Network"

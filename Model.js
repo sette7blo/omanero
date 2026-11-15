@@ -15,6 +15,9 @@ var AMOUNT_RE = /^\d{1,10}(\.\d{1,12})?$/
 var NODE_RE = /^(https?:\/\/)?[A-Za-z0-9.-]{1,253}:\d{1,5}$/
 var HEX64_RE = /^[0-9a-f]{64}$/
 var ID_RE = /^[0-9a-f]{1,32}$/
+var WALLET_NAME_RE = /^[a-z0-9][a-z0-9-]{0,23}$/
+var PLUGIN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
+var HOMEPAGE_RE = /^https:\/\/[A-Za-z0-9.-]{1,100}(\/[A-Za-z0-9._~\/-]{0,150})?$/
 var HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/
 var SEED_RE = /^[a-z]+( [a-z]+){24}$/
 
@@ -58,7 +61,7 @@ function emptyStatus() {
     autoLockMinutes: 30, walletExists: false, restoreHeight: 0,
     unlocked: false, busy: false, synced: false, nodeReachable: true,
     address: "", balance: "0", unlockedBalance: "0", height: 0, daemonHeight: 0,
-    request: null, page: []
+    request: null, page: [], wallet: "omanero", wallets: []
   }
 }
 
@@ -87,6 +90,16 @@ function parsePage(raw) {
   return items
 }
 
+function parseWallets(raw) {
+  var items = []
+  var list = Array.isArray(raw) ? raw : []
+  for (var i = 0; i < list.length && items.length < 20; i++) {
+    var name = list[i] && typeof list[i].name === "string" && WALLET_NAME_RE.test(list[i].name) ? list[i].name : ""
+    if (name) items.push({ name: name, address: address(list[i].address) })
+  }
+  return items
+}
+
 function parseStatus(raw) {
   var data = parseJson(raw)
   if (!data || data.ok !== true) return null
@@ -107,7 +120,9 @@ function parseStatus(raw) {
     address: address(data.address),
     balance: amount(data.balance), unlockedBalance: amount(data.unlockedBalance),
     height: int(data.height), daemonHeight: int(data.daemonHeight),
-    request: parseRequest(data.request), page: parsePage(data.page)
+    request: parseRequest(data.request), page: parsePage(data.page),
+    wallet: typeof data.wallet === "string" && WALLET_NAME_RE.test(data.wallet) ? data.wallet : "omanero",
+    wallets: parseWallets(data.wallets)
   }
 }
 
@@ -166,6 +181,29 @@ function parseQr(result) {
   return { address: to, rows: rows, size: rows.length }
 }
 
+// Installed plugins whose manifest names a Monero address for their author.
+function parsePlugins(result) {
+  var items = []
+  var list = Array.isArray(result.plugins) ? result.plugins : []
+  for (var i = 0; i < list.length && items.length < 100; i++) {
+    var p = list[i]
+    var to = p && typeof p === "object" ? address(p.address) : ""
+    var id = to && typeof p.id === "string" && PLUGIN_ID_RE.test(p.id) ? p.id : ""
+    if (!id) continue
+    var homepage = typeof p.homepage === "string" && HOMEPAGE_RE.test(p.homepage) ? p.homepage : ""
+    items.push({
+      id: id, name: text(p.name) || id, author: text(p.author), address: to,
+      homepage: homepage, source: "plugin"
+    })
+  }
+  return items
+}
+
+function pluginSubtitle(item) {
+  var where = item.homepage ? item.homepage.replace(/^https:\/\//, "") : item.id
+  return item.author ? "by " + item.author + ", " + where : where
+}
+
 // ----- Display ------------------------------------------------------------
 
 function shortAddress(value) {
@@ -217,6 +255,11 @@ function tipNames(items) {
 // A page can show any address under any name, so the wording never claims
 // more than where the address was seen.
 function tipNote(item) {
+  if (item.source === "plugin") {
+    return "This address is from the manifest of the installed plugin " + item.name
+      + (item.homepage ? " (" + item.homepage.replace(/^https:\/\//, "") + ")" : "")
+      + ". Nobody has verified it; a copy of a plugin can carry someone else's address."
+  }
   var where = item.source === "bio" ? "the X bio" : "a post on X"
   return "This address was found in " + where + (item.handle ? " of @" + item.handle : "")
     + ". Nobody has verified it; check it before sending."
@@ -242,7 +285,19 @@ function heroMeta(st) {
 
 function networkLine(st) {
   if (!st) return ""
-  return (st.network === "stagenet" ? "Stagenet" : "Mainnet") + (st.node ? " via " + st.node : "")
+  // The wallet's name only matters once there is more than one.
+  return (st.wallets.length > 1 ? st.wallet + ", " : "")
+    + (st.network === "stagenet" ? "Stagenet" : "Mainnet") + (st.node ? " via " + st.node : "")
+}
+
+function walletNameProblem(name, wallets) {
+  var n = String(name || "").replace(/^\s+|\s+$/g, "").toLowerCase()
+  if (n === "") return "Give the new wallet a name."
+  if (!WALLET_NAME_RE.test(n) || n === "removed") return "Use 1 to 24 lowercase letters, digits or dashes for the name."
+  for (var i = 0; i < (wallets || []).length; i++) {
+    if (wallets[i].name === n) return "There is already a wallet with that name."
+  }
+  return ""
 }
 
 function passwordProblem(first, second) {
@@ -302,9 +357,10 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     PLUGIN_ID: PLUGIN_ID, emptyStatus: emptyStatus, parseStatus: parseStatus, parseResult: parseResult,
     parseSeed: parseSeed, parseReview: parseReview, parseReceipt: parseReceipt,
-    parseTransfers: parseTransfers, parseQr: parseQr, parsePage: parsePage,
+    parseTransfers: parseTransfers, parseQr: parseQr, parsePage: parsePage, parsePlugins: parsePlugins,
+    pluginSubtitle: pluginSubtitle,
     tipName: tipName, tipNames: tipNames, tipNote: tipNote, shortAddress: shortAddress, groupedAddress: groupedAddress,
-    syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine,
+    syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine, walletNameProblem: walletNameProblem,
     passwordProblem: passwordProblem, seedProblem: seedProblem, sendProblem: sendProblem,
     timeAgo: timeAgo, transferRows: transferRows
   }

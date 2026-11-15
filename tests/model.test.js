@@ -13,7 +13,8 @@ function status(patch) {
     nodes: ["xmr-node.cakewallet.com:18081", "node.sethforprivacy.com:443"], autoLockMinutes: 30,
     walletExists: true, restoreHeight: 3400000, unlocked: true, busy: false, synced: true,
     nodeReachable: true, address: MAIN, balance: "2.5", unlockedBalance: "2",
-    height: 3409000, daemonHeight: 3409000, request: null
+    height: 3409000, daemonHeight: 3409000, request: null,
+    wallet: "omanero", wallets: [{ name: "omanero", address: MAIN }]
   }, patch))
 }
 
@@ -82,6 +83,40 @@ test("status: addresses seen on the X page", () => {
   assert.deepEqual(M.parseStatus(status({ page: "x" })).page, [])
   assert.equal(M.parseStatus(status({ page: Array(9).fill({ address: MAIN, handle: "a", source: "bio" }) })).page.length, 5)
   assert.deepEqual(M.emptyStatus().page, [])
+})
+
+test("plugins with a funding line", () => {
+  const items = M.parsePlugins({ plugins: [
+    { id: "io.example.zeta", name: "Zeta", author: "Zed", homepage: "https://github.com/zed/zeta", address: MAIN },
+    { id: "io.example.alpha", name: "", author: 5, homepage: "javascript:alert(1)", address: MAIN },
+    { id: "../x", name: "Bad", address: MAIN },
+    { id: "io.example.noaddr", name: "No", address: "<b>" }, null, "x"
+  ] })
+  assert.equal(items.length, 2)
+  assert.deepEqual(items[0], { id: "io.example.zeta", name: "Zeta", author: "Zed", address: MAIN,
+    homepage: "https://github.com/zed/zeta", source: "plugin" })
+  assert.equal(items[1].name, "io.example.alpha")
+  assert.equal(items[1].homepage, "")
+  assert.equal(M.pluginSubtitle(items[0]), "by Zed, github.com/zed/zeta")
+  assert.equal(M.pluginSubtitle(items[1]), "by 5, io.example.alpha")
+  assert.match(M.tipNote(items[0]), /manifest of the installed plugin Zeta \(github.com\/zed\/zeta\)\. Nobody has verified it/)
+  assert.deepEqual(M.parsePlugins({}), [])
+})
+
+test("several wallets", () => {
+  const st = M.parseStatus(status({ wallet: "tips", wallets: [
+    { name: "omanero", address: MAIN }, { name: "tips", address: "<b>" }, { name: "Bad Name" }, null
+  ] }))
+  assert.equal(st.wallet, "tips")
+  assert.deepEqual(st.wallets, [{ name: "omanero", address: MAIN }, { name: "tips", address: "" }])
+  assert.equal(M.networkLine(st), "tips, Mainnet via xmr-node.cakewallet.com:18081")
+  assert.equal(M.parseStatus(status({ wallet: "<b>" })).wallet, "omanero")
+  assert.deepEqual(M.parseStatus(status({ wallets: "x" })).wallets, [])
+  assert.equal(M.walletNameProblem("", st.wallets), "Give the new wallet a name.")
+  assert.match(M.walletNameProblem("My Wallet", st.wallets), /lowercase/)
+  assert.match(M.walletNameProblem("removed", st.wallets), /lowercase/)
+  assert.equal(M.walletNameProblem(" Tips ", st.wallets), "There is already a wallet with that name.")
+  assert.equal(M.walletNameProblem("savings-2", st.wallets), "")
 })
 
 test("levels and sync lines", () => {
