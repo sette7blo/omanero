@@ -29,6 +29,8 @@ Item {
   property var transfers: []
   property bool transfersLoaded: false
   property var qr: null
+  property var plugins: []
+  property bool pluginsLoaded: false
 
   readonly property string requestId: status.request ? status.request.id : ""
 
@@ -40,13 +42,23 @@ Item {
   property string pendingInput: ""
 
   // --- Commands ------------------------------------------------------------
-  function create(password) {
-    enqueue("create", ["create"], { password: String(password || "") })
+  // A name adds another wallet; without one the first wallet is made.
+  function create(password, name) {
+    enqueue("create", ["create"], { password: String(password || ""), name: String(name || "") })
   }
-  function restore(seed, password, restoreHeight) {
+  function restore(seed, password, restoreHeight, name) {
     enqueue("restore", ["restore"], {
-      seed: String(seed || ""), password: String(password || ""), restoreHeight: String(restoreHeight || "")
+      seed: String(seed || ""), password: String(password || ""), restoreHeight: String(restoreHeight || ""),
+      name: String(name || "")
     })
+  }
+  function removeWallet(name) {
+    root.review = null
+    root.receipt = null
+    root.transfers = []
+    root.transfersLoaded = false
+    root.qr = null
+    enqueue("forget", ["forget"], { name: String(name || "") })
   }
   function unlock(password) {
     enqueue("unlock", ["unlock"], { password: String(password || "") })
@@ -76,6 +88,7 @@ Item {
   function clearError() { root.error = "" }
   function loadHistory() { enqueue("history", ["history"], null) }
   function loadQr() { enqueue("qr", ["qr"], null) }
+  function loadPlugins() { enqueue("plugins", ["plugins"], null) }
   function dismissRequest() { enqueue("dismiss", ["dismiss"], null) }
   function saveConfig(changes) { enqueue("config", ["config", "apply"], { set: changes }) }
 
@@ -120,6 +133,9 @@ Item {
       root.transfersLoaded = true
     } else if (kind === "qr") {
       root.qr = Model.parseQr(res)
+    } else if (kind === "plugins") {
+      root.plugins = Model.parsePlugins(res)
+      root.pluginsLoaded = true
     }
   }
 

@@ -377,6 +377,91 @@ class Wallet(unittest.TestCase):
              self.state + "/page.json")
         self.assertEqual(self.run_cli("status")["page"], [])
 
+    def test_plugins_with_a_funding_line(self):
+        root = self.tmp + "/config/omarchy/plugins"
+
+        def plugin(folder, manifest):
+            os.makedirs(root + "/" + folder)
+            with open(root + "/" + folder + "/manifest.json", "w") as handle:
+                handle.write(manifest if isinstance(manifest, str) else json.dumps(manifest))
+
+        self.assertEqual(self.run_cli("plugins")["plugins"], [])
+        plugin("zeta", {"id": "io.example.zeta", "name": "Zeta\nBar", "author": "<b>Zed</b>",
+                        "homepage": "https://github.com/zed/zeta", "funding": {"monero": MAIN}})
+        plugin("alpha", {"id": "io.example.alpha", "homepage": "javascript:alert(1)",
+                         "funding": {"monero": "8" + "A" * 94, "bitcoin": "bc1"}})
+        plugin("stage", {"id": "io.example.stage", "name": "Stage", "funding": {"monero": STAGE}})
+        plugin("none", {"id": "io.example.none", "name": "None"})
+        plugin("odd", {"id": "io.example.odd", "name": "Odd", "funding": "send money"})
+        plugin("badid", {"id": "../x", "name": "Bad", "funding": {"monero": MAIN}})
+        plugin("broken", "{not json")
+        plugin("list", "[1, 2]")
+        plugin(".hidden", {"id": "io.example.hidden", "funding": {"monero": MAIN}})
+        os.makedirs(root + "/empty")
+        os.symlink(root + "/zeta", root + "/linked")
+        got = self.run_cli("plugins")["plugins"]
+        self.assertEqual([p["id"] for p in got], ["io.example.alpha", "io.example.zeta"])
+        self.assertEqual(got[0], {"id": "io.example.alpha", "name": "io.example.alpha", "author": "",
+                                  "homepage": "", "address": "8" + "A" * 94})
+        self.assertEqual(got[1], {"id": "io.example.zeta", "name": "Zeta Bar", "author": "<b>Zed</b>",
+                                  "homepage": "https://github.com/zed/zeta", "address": MAIN})
+
+    def test_several_wallets(self):
+        folder = self.tmp + "/data/omanero/mainnet"
+        self.create()
+        st = self.run_cli("status")
+        self.assertEqual((st["wallet"], [w["name"] for w in st["wallets"]]), ("omanero", ["omanero"]))
+
+        for bad in ("Has Space", "../x", "removed", "x" * 25, "-lead"):
+            self.assertIn("wallet name", self.run_cli("create", data={"password": "pw2", "name": bad})["error"], bad)
+        self.assertIn("already exists", self.run_cli("create", data={"password": "pw2", "name": "omanero"})["error"])
+        # A failed attempt leaves the wallet in use alone.
+        self.assertEqual(self.run_cli("status")["wallet"], "omanero")
+
+        self.assertTrue(self.run_cli("create", data={"password": "pw2", "name": "Tips"})["ok"])
+        st = self.run_cli("status")
+        self.assertTrue(st["unlocked"])
+        self.assertEqual((st["wallet"], [w["name"] for w in st["wallets"]]), ("tips", ["omanero", "tips"]))
+        self.assertEqual(st["wallets"][1]["address"], MAIN)
+        self.assertTrue(os.path.exists(folder + "/tips.meta.json"))
+        self.assertTrue(os.path.exists(folder + "/meta.json"))
+
+        self.assertIn("no wallet named", self.run_cli("config", "apply", data={"set": {"wallet": "nope"}})["error"])
+        moved = self.run_cli("use", "omanero")
+        self.assertTrue(moved["locked"])
+        st = self.run_cli("status")
+        self.assertEqual((st["wallet"], st["unlocked"]), ("omanero", False))
+        # Each wallet has its own password.
+        self.assertIn("Wrong password", self.run_cli("unlock", data={"password": "pw2"})["error"])
+        self.assertTrue(self.run_cli("unlock", data={"password": "hunter2"})["ok"])
+
+        restored = self.run_cli("restore", data={"seed": SEED, "restoreHeight": "100", "password": "pw3", "name": "old"})
+        self.assertTrue(restored["ok"])
+        self.assertEqual(self.run_cli("wallets")["wallet"], "old")
+
+    def test_remove_wallet_moves_files_aside(self):
+        folder = self.tmp + "/data/omanero/mainnet"
+        self.create()
+        self.run_cli("create", data={"password": "pw2", "name": "tips"})
+        self.assertIn("no wallet named", self.run_cli("forget", data={"name": "nope"})["error"])
+
+        gone = self.run_cli("forget", data={"name": "tips"})
+        self.assertEqual((gone["removed"], gone["wallet"]), ("tips", "omanero"))
+        self.assertEqual(sorted(os.listdir(gone["movedTo"])), ["tips.keys", "tips.meta.json"])
+        self.assertTrue(gone["movedTo"].startswith(folder + "/removed/tips-"))
+        st = self.run_cli("status")
+        self.assertEqual((st["wallet"], st["unlocked"], [w["name"] for w in st["wallets"]]), ("omanero", False, ["omanero"]))
+        self.assertTrue(st["walletExists"])
+
+        # The name is free again, and the last wallet can go too.
+        self.assertTrue(self.run_cli("create", data={"password": "pw4", "name": "tips"})["ok"])
+        self.run_cli("forget", data={"name": "tips"})
+        last = self.run_cli("forget", data={})
+        self.assertEqual(sorted(os.listdir(last["movedTo"])), ["meta.json", "omanero.keys"])
+        st = self.run_cli("status")
+        self.assertEqual((st["walletExists"], st["wallets"], st["wallet"]), (False, [], "omanero"))
+        self.assertEqual(len(os.listdir(folder + "/removed")), 3)
+
     def test_link_request(self):
         got = self.run_cli("uri", "monero:%s?tx_amount=0.02&tx_description=thanks" % MAIN)
         self.assertTrue(got["ok"])

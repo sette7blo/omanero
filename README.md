@@ -57,6 +57,20 @@ few minutes to a quarter of an hour depending on the node. The panel shows how
 many blocks are left, and the wallet answers slowly while it does this. Later
 unlocks only catch up on what happened since the last one.
 
+### More than one wallet
+
+Settings has a **Wallet** section:
+
+- **Add a wallet** creates or restores another one under a name you choose.
+  It has its own seed and password, and becomes the wallet in use.
+- With more than one, press a wallet's name to switch. The current one is
+  locked first.
+- **Remove this wallet** takes it out of omanero. Its files are moved to
+  `~/.local/share/omanero/<network>/removed/`, never deleted, but to reach the
+  money again you need its 25-word seed, so write that down first.
+
+One wallet is open at a time. Mainnet and stagenet each have their own set.
+
 ### Restore height
 
 Monero cannot look up "your" transactions; the wallet has to scan blocks for
@@ -123,6 +137,32 @@ its own.
 
 The same panel answers any `monero:` link, from any site or app.
 
+## Tipping plugin authors
+
+The **Plugins** tab lists the Omarchy plugins installed on this machine whose
+author has published a Monero address, each with a **Tip** button. It reads
+the manifests already on disk; nothing is fetched.
+
+The address is whatever the installed copy says. A fork or a tampered copy
+can carry someone else's address, so the list shows where each plugin came
+from, and the send form says the address is not verified.
+
+### For plugin authors
+
+Add one field to your plugin's `manifest.json`:
+
+```json
+"funding": { "monero": "4..." }
+```
+
+- A standard address or a subaddress, mainnet. A subaddress per plugin lets
+  you tell the tips apart.
+- Omarchy ignores fields it does not know, so the plugin still validates and
+  loads as before.
+- Anything else that reads manifests, a plugin manager for instance, can offer
+  the same button by opening `monero:<address>?recipient_name=<plugin name>`.
+  Any Monero wallet that handles `monero:` links will answer it.
+
 ## Command line
 
 ```sh
@@ -130,9 +170,14 @@ omanero status                 # balance, address, sync state
 omanero create                 # new wallet, prints the seed once
 omanero restore                # asks for seed, restore height, password
 omanero unlock | lock
+omanero wallets                # list them; * marks the one in use
+omanero create --name tips     # add another wallet (restore takes --name too)
+omanero use tips               # switch
+omanero forget tips            # take it out; the files are moved aside
 omanero send <address> <amount>   # shows the fee and asks before sending
 omanero history
 omanero qr                     # the wallet address as a QR code
+omanero plugins                # installed plugins whose author can be tipped
 omanero seed                   # show the seed of the unlocked wallet
 omanero config                 # show settings
 omanero config set node node.sethforprivacy.com:443

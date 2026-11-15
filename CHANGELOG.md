@@ -6,6 +6,13 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Several wallets: add another under a name, switch between them, and remove one from
+  omanero (its files are moved to `removed/`, never deleted). In Settings, and as
+  `omanero wallets`, `create --name`, `restore --name`, `use` and `forget`.
+- Plugins tab: tip the authors of installed Omarchy plugins whose `manifest.json` has
+  `"funding": { "monero": "<address>" }`. Also `omanero plugins` in a terminal.
+
 ## [v0.1.0] - 2026-11-15
 
 First release. Sending a payment end to end has not been tested yet: try stagenet or a
