@@ -2,7 +2,7 @@
 
 ## Where we are
 
-First working version, on GitHub, not yet released. Checked on stagenet against a real
+v0.1.0 released 2026-11-15. Checked on stagenet against a real
 `monero-wallet-rpc` 0.18.5.4 on 2026-11-15: create, sync, lock, unlock, wrong password,
 restore by date, address checks, review with no funds, history, link request, seed.
 **Not yet checked: a real send** (needs stagenet coins) and the three mainnet nodes.
@@ -22,7 +22,6 @@ small operator, and it would be the extension's first network request.
    relay, history, and the auto-lock afterwards.
 2. Look at every panel view on screen and fix layout.
 3. Create a mainnet wallet and confirm each of the three default nodes syncs it.
-4. Release v0.1.0.
 
 ## Ideas, not scheduled
 

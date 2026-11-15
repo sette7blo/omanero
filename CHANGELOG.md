@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-11-15
+
+First release. Sending a payment end to end has not been tested yet: try stagenet or a
+small amount first.
+
 ### Added
 - Hot Monero wallet in the Omarchy bar that uses a remote node: no local node, no
   blockchain download.
@@ -15,12 +20,13 @@ project uses [Semantic Versioning](https://semver.org/).
   with a copyable address, and a history of recent payments.
 - Handler for `monero:` links: the panel opens with the address and amount filled in.
 - Browser extension for X (`extension/`): a Tip control next to Monero addresses in bios
-  and posts, the bar icon in the accent colour when the page in front has one, and "Tip @name" in
-  the panel. People whose bio was seen with an address get an XMR badge next to their name
-  in the feed and in follower lists.
+  and posts, the bar icon in the accent colour when the page in front has one, and
+  "Tip @name" in the panel. People whose bio was seen with an address get an XMR badge
+  next to their name in the feed and in follower lists.
 - Settings for the node (Cake Wallet's three defaults or any other), mainnet or
   stagenet, and auto-lock after idle minutes.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/commits/main
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/sette7blo/omanero/releases/tag/v0.1.0
