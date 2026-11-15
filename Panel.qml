@@ -66,6 +66,13 @@ Panel {
     || addressField.activeFocus || amountField.activeFocus || nodeField.activeFocus
     || lockField.field.activeFocus || nameField.activeFocus
 
+  // 0 to 3, stepped by a timer while a command runs.
+  property int busyStep: 0
+  readonly property string busyDots: "...".slice(0, busyStep) + "   ".slice(busyStep)
+  readonly property string busyLine: busyText !== "" ? busyText + (Style.reduceMotion ? "..." : busyDots) : ""
+  readonly property bool settingUp: busy && service !== null
+    && (service.busyKind === "create" || service.busyKind === "restore")
+
   readonly property string busyText: {
     if (!busy || !service) return ""
     var kind = service.busyKind
@@ -249,6 +256,14 @@ Panel {
   }
 
   Timer {
+    interval: 400
+    repeat: true
+    running: root.busy && root.opened && !Style.reduceMotion
+    onRunningChanged: root.busyStep = 0
+    onTriggered: root.busyStep = (root.busyStep + 1) % 4
+  }
+
+  Timer {
     interval: 2000
     running: root.copied
     onTriggered: root.copied = false
@@ -415,6 +430,8 @@ Panel {
           TextField {
             id: nameField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             placeholderText: "tips"
             foreground: root.foreground
             accent: root.accent
@@ -428,6 +445,8 @@ Panel {
           TextField {
             id: seedField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             password: true
             placeholderText: "Paste or type the 25 words"
             foreground: root.foreground
@@ -441,6 +460,8 @@ Panel {
           TextField {
             id: heightField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             placeholderText: "Block number, or a date like 2024-03-15"
             foreground: root.foreground
             accent: root.accent
@@ -453,6 +474,8 @@ Panel {
           TextField {
             id: newPassField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             password: true
             foreground: root.foreground
             accent: root.accent
@@ -464,6 +487,8 @@ Panel {
           TextField {
             id: repeatPassField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             password: true
             foreground: root.foreground
             accent: root.accent
@@ -473,8 +498,16 @@ Panel {
         }
 
         PanelButton {
-          text: root.setupMode === "restore" ? "Restore wallet" : "Create wallet"
+          text: root.settingUp ? root.busyLine
+            : (root.setupMode === "restore" ? "Restore wallet" : "Create wallet")
           onClicked: root.submitSetup()
+        }
+
+        Note {
+          visible: root.settingUp
+          text: root.service && root.service.busyKind === "restore"
+            ? "This can take a minute or more."
+            : "This can take up to a minute. The seed appears next; have paper ready."
         }
 
         PanelButton {
@@ -550,6 +583,8 @@ Panel {
           TextField {
             id: unlockField
             width: parent.width
+            enabled: !root.busy
+            opacity: enabled ? 1 : 0.45
             password: true
             foreground: root.foreground
             accent: root.accent
@@ -558,7 +593,7 @@ Panel {
         }
 
         PanelButton {
-          text: "Unlock"
+          text: root.busy && root.service && root.service.busyKind === "unlock" ? root.busyLine : "Unlock"
           onClicked: root.submitUnlock()
         }
 
@@ -1078,7 +1113,7 @@ Panel {
       // ---- Progress and errors, shared by every view ----
       FieldLabel {
         visible: root.busyText !== ""
-        text: root.busyText
+        text: root.busyLine
       }
 
       Text {

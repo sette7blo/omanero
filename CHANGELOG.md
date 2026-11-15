@@ -6,6 +6,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- While a wallet is created, restored or unlocked, the form's fields are locked and the
+  button shows the progress with moving dots, instead of a field that looks typeable.
+
 ## [v0.2.0] - 2026-11-15
 
 ### Added
