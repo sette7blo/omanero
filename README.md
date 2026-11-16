@@ -2,8 +2,8 @@
 
 Omarchy plugin: a small hot Monero wallet in the bar. Create a wallet or
 restore one from its seed, send and receive, tip the Monero addresses you
-come across on X, and tip the authors of installed plugins that publish an
-address. The bar icon shows when the page in front has one.
+come across on X and on GitHub, and tip the authors of installed plugins that
+publish an address. The bar icon shows when the page in front has one.
 
 There is no local node and no blockchain on your computer. The wallet talks to
 a public node you pick; your keys stay in an encrypted wallet file on this
@@ -27,7 +27,7 @@ That is the only command. The first time the plugin loads, it installs
 are missing. A terminal opens for your password when a package has to be
 installed. It also links the `omanero` command and a launcher, makes omanero
 the handler for `monero:` links unless another wallet already is, and adds the
-X extension to the browser flags Omarchy already uses. Restart the browser
+browser extension for X and GitHub to the browser flags Omarchy already uses. Restart the browser
 once and the Tip controls appear.
 
 It never creates or touches a wallet.
@@ -123,12 +123,13 @@ the wallet.
 
 Stagenet (play money) is a switch in Settings and has its own wallet.
 
-## Tipping on X
+## Tipping on X and GitHub
 
 omanero ships a small browser extension, in `extension/x/`, for Brave, Chromium,
-Chrome, Vivaldi and Edge. It only reads x.com pages: it makes no network
-requests and holds no keys. The one thing it stores is the list of handles it
-has seen with an address.
+Chrome, Vivaldi and Edge. It reads x.com and github.com pages and holds no
+keys. On X it makes no network requests. On GitHub it makes two, described
+below. It stores the X handles it has seen with an address, and for a day,
+what each GitHub repo it looked up publishes.
 
 The installer adds the extension to the browser flags files Omarchy already
 uses, including Chromium, Brave, Chrome, and Edge, and writes the link that
@@ -159,6 +160,43 @@ After that:
 or a reply, and scammers do. The panel says where the address was seen; make
 sure it is the person you mean before the last press. omanero never sends on
 its own.
+
+### On GitHub
+
+On a repository's front page and on a profile, the extension looks in these
+places, best first:
+
+| Where | Read how |
+|---|---|
+| The repo's `manifest.json`, `"funding": { "monero": "4..." }` | Fetched from the repo on screen |
+| The repo's `.github/FUNDING.yml`, a `monero:` link under `custom` | Fetched from the repo on screen |
+| A profile's bio | Read from the page |
+| The README, or a profile README | Read from the page |
+
+The manifest field is the one the Authors tab reads from installed plugins, so
+a plugin author who added it there is covered on GitHub too. `FUNDING.yml` is
+GitHub's own funding file; it has no Monero entry, and whether GitHub's
+Sponsor button accepts a `monero:` link under `custom` is not documented, so
+the extension reads one if it is there but does not ask authors to add it.
+
+The two files are fetched from `raw.githubusercontent.com` for the repo
+already on screen, without cookies or a referrer, at most once a day per repo.
+GitHub learns nothing it did not already see. No other site is ever asked.
+
+A **Tip XMR** control appears beside the Releases heading, or under About when
+the repo has no releases. It carries the address from a file, or the first one
+in the README when no file names one. A README address that differs from the
+file's gets its own control under its paragraph, and so does one in a bio. The
+bar icon lights up and the panel offers **Tip owner/repo**. The send form says
+where the address came from, and says so when the repo is a fork, since a fork
+can carry its own address.
+
+![A GitHub repository page with a Tip XMR control beside the Releases heading](docs/github.png)
+
+To make your own repo tippable, put your address in the README; nothing else
+is needed. A plugin that already has `funding.monero` in its `manifest.json`
+is covered without touching the README. As on X, nothing verifies the address:
+the control only fills in the send form, and you review before anything is sent.
 
 The same panel answers any `monero:` link, from any site or app.
 

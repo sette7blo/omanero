@@ -6,7 +6,9 @@
 # never touched. SIDE_PROFILE=1 checks that the wallet turns away a browser
 # that is not on the main profile, where the extension must show nothing. Expect two pills on the profile, then on the feed badges for Ann and Dave
 # (not Bob, whose address was only in a post), two page entries, a request for @Ann_B,
-# and an empty page once the browser has closed.
+# and an empty page once the browser has closed. MODE=github runs the GitHub
+# case instead: a profile bio, then a forked repo whose manifest.json and README
+# each name an address, and a tip from the manifest's control.
 set -u
 T=$(mktemp -d)
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,7 +30,7 @@ JSON
 BRAVE=$!
 for i in $(seq 40); do curl -s -o /dev/null http://127.0.0.1:$PORT/json/version && break; sleep 0.5; done
 mkfifo $T/ctl
-$NODE "$(dirname "$0")/cdp.js" $PORT tip < $T/ctl > $T/cdp.out 2>&1 &
+$NODE "$(dirname "$0")/cdp.js" $PORT ${MODE:-tip} < $T/ctl > $T/cdp.out 2>&1 &
 exec 9> $T/ctl
 for i in $(seq 40); do grep -q "READY\|FAILED" $T/cdp.out 2>/dev/null && break; sleep 0.5; done
 cat $T/cdp.out

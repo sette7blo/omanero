@@ -85,6 +85,9 @@ WALLET_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,23}$")
 PLUGIN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 HOMEPAGE_RE = re.compile(r"^https://[A-Za-z0-9.-]{1,100}(/[A-Za-z0-9._~/-]{0,150})?$")
 HANDLE_RE = re.compile(r"^[A-Za-z0-9_]{1,15}$")
+# A GitHub owner, or owner/repo.
+GITHUB_NAME_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(/[A-Za-z0-9._-]{1,100})?$")
+GITHUB_SOURCES = ("manifest", "funding", "readme", "bio", "profile")
 DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
 
 
@@ -719,9 +722,30 @@ def page_items(raw, network):
         except Fail:
             continue
         handle = str(item.get("handle") or "")
+        if item.get("site") == "github":
+            if not GITHUB_NAME_RE.match(handle) or handle.endswith(("/.", "/..")):
+                handle = ""
+            source = item.get("source") if item.get("source") in GITHUB_SOURCES else "readme"
+            items.append({"address": address, "handle": handle, "source": source, "site": "github",
+                          "fork": item.get("fork") is True})
+            continue
         items.append({"address": address, "handle": handle if HANDLE_RE.match(handle) else "",
-                      "source": "bio" if item.get("source") == "bio" else "post"})
+                      "source": "bio" if item.get("source") == "bio" else "post", "site": "x"})
     return items
+
+
+def tip_request(item):
+    # What the panel says about where a tip address came from.
+    if item["site"] == "github":
+        where = {"manifest": "the repo's manifest.json", "funding": "the repo's FUNDING.yml",
+                 "readme": "the repo's README", "bio": "their GitHub bio",
+                 "profile": "their GitHub profile README"}[item["source"]]
+        return {"recipient": item["handle"],
+                "description": "address found in %s%s, not verified"
+                % (where, ", which is a fork" if item["fork"] else "")}
+    where = "their X bio" if item["source"] == "bio" else "a post on X"
+    return {"recipient": "@" + item["handle"] if item["handle"] else "",
+            "description": "address found in %s, not verified" % where}
 
 
 def host_alive(pid):
@@ -1319,7 +1343,7 @@ def from_side_profile():
 
 
 def native_host():
-    # Started by the browser for extension/background.js and kept running while
+    # Started by the browser for the extension's background script and kept running while
     # the front tab shows a Monero address. Everything it is told comes from a
     # web page: it can light the bar indicator and fill in the send form, and
     # nothing more.
@@ -1338,10 +1362,9 @@ def native_host():
                 if not items:
                     continue
                 last_tip = time.time()
-                where = "their X bio" if items[0]["source"] == "bio" else "a post on X"
-                post_request({"address": items[0]["address"], "amount": "",
-                              "recipient": "@" + items[0]["handle"] if items[0]["handle"] else "",
-                              "description": "address found in %s, not verified" % where})
+                request = {"address": items[0]["address"], "amount": ""}
+                request.update(tip_request(items[0]))
+                post_request(request)
     except (Fail, OSError):
         pass
     finally:

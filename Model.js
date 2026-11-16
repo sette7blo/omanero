@@ -19,6 +19,8 @@ var WALLET_NAME_RE = /^[a-z0-9][a-z0-9-]{0,23}$/
 var PLUGIN_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/
 var HOMEPAGE_RE = /^https:\/\/[A-Za-z0-9.-]{1,100}(\/[A-Za-z0-9._~\/-]{0,150})?$/
 var HANDLE_RE = /^[A-Za-z0-9_]{1,15}$/
+var GITHUB_NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(\/[A-Za-z0-9._-]{1,100})?$/
+var GITHUB_SOURCES = ["manifest", "funding", "readme", "bio", "profile"]
 var SEED_RE = /^[a-z]+( [a-z]+){24}$/
 
 function text(value, max) {
@@ -84,8 +86,17 @@ function parsePage(raw) {
   for (var i = 0; i < list.length && items.length < 5; i++) {
     var to = list[i] && typeof list[i] === "object" ? address(list[i].address) : ""
     if (!to) continue
-    var handle = typeof list[i].handle === "string" && HANDLE_RE.test(list[i].handle) ? list[i].handle : ""
-    items.push({ address: to, handle: handle, source: list[i].source === "bio" ? "bio" : "post" })
+    var raw = list[i]
+    if (raw.site === "github") {
+      items.push({
+        address: to, site: "github", fork: raw.fork === true,
+        handle: typeof raw.handle === "string" && GITHUB_NAME_RE.test(raw.handle) ? raw.handle : "",
+        source: GITHUB_SOURCES.indexOf(raw.source) !== -1 ? raw.source : "readme"
+      })
+      continue
+    }
+    var handle = typeof raw.handle === "string" && HANDLE_RE.test(raw.handle) ? raw.handle : ""
+    items.push({ address: to, handle: handle, source: raw.source === "bio" ? "bio" : "post", site: "x" })
   }
   return items
 }
@@ -243,7 +254,8 @@ function level(st) {
 }
 
 function tipName(item) {
-  return item.handle ? "@" + item.handle : shortAddress(item.address)
+  if (!item.handle) return shortAddress(item.address)
+  return item.site === "github" ? item.handle : "@" + item.handle
 }
 
 function tipNames(items) {
@@ -264,6 +276,13 @@ function tipNote(item) {
     return "This address is from the manifest of the installed plugin " + item.name
       + (item.homepage ? " (" + item.homepage.replace(/^https:\/\//, "") + ")" : "")
       + ". Nobody has verified it; a copy of a plugin can carry someone else's address."
+  }
+  if (item.site === "github") {
+    var places = { manifest: "the manifest.json", funding: "the FUNDING.yml", readme: "the README",
+      bio: "the GitHub bio", profile: "the profile README" }
+    return "This address is from " + places[item.source] + " of " + (item.handle || "this GitHub page")
+      + (item.fork ? ", which is a fork: its address can differ from the original's" : "")
+      + ". Nobody has verified it; check it before sending."
   }
   var where = item.source === "bio" ? "the X bio" : "a post on X"
   return "This address was found in " + where + (item.handle ? " of @" + item.handle : "")

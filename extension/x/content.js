@@ -20,24 +20,9 @@
   }
 
   function control(item, attribute, label, style) {
-    var button = document.createElement("button")
-    button.type = "button"
-    button.setAttribute(attribute, item.address)
-    button.textContent = label
-    button.title = "Tip with the omanero wallet"
-    // One fixed look, Monero orange with white text, so the control reads the
-    // same on a bio, in a post and inside a name link, in X's light and dark
-    // themes alike. Nothing is inherited from where it lands.
-    button.style.cssText = "border:0;border-radius:9999px;background:#f26822;color:#fff;"
-      + "-webkit-text-fill-color:#fff;font:inherit;font-weight:700;letter-spacing:normal;"
-      + "text-transform:none;text-decoration:none;white-space:nowrap;cursor:pointer;flex:none;" + style
-    button.addEventListener("click", function (event) {
-      // Posts and names are links; the press must not also follow them.
-      event.preventDefault()
-      event.stopPropagation()
-      send({ type: "tip", address: item.address, handle: item.handle, source: item.source })
+    return OmaneroPill.make(item, attribute, label, style, function (it) {
+      send({ type: "tip", address: it.address, handle: it.handle, source: it.source })
     })
-    return button
   }
 
   // What the page wrote, without anything this script added to it.
@@ -57,8 +42,7 @@
     if (existing && item && existing.getAttribute(MARK) === item.address) return
     if (existing) existing.remove()
     if (item) {
-      node.insertAdjacentElement("afterend", control(item, MARK, "Tip XMR",
-        "display:inline-block;margin:6px 0 0;padding:3px 12px;font-size:13px;line-height:18px"))
+      node.insertAdjacentElement("afterend", control(item, MARK, "Tip XMR", OmaneroPill.PILL_STYLE))
     }
   }
 

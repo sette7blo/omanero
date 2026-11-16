@@ -327,8 +327,8 @@ class Wallet(unittest.TestCase):
                 {"address": "<b>", "handle": "x", "source": "post"},
                 {"address": "8" + "A" * 94, "handle": "<script>", "source": "elsewhere"}, "junk"]})
             self.assertEqual(self.wait_page(2), [
-                {"address": MAIN, "handle": "ann_b", "source": "bio"},
-                {"address": "8" + "A" * 94, "handle": "", "source": "post"}])
+                {"address": MAIN, "handle": "ann_b", "source": "bio", "site": "x"},
+                {"address": "8" + "A" * 94, "handle": "", "source": "post", "site": "x"}])
 
             self.assertIsNone(self.run_cli("status")["request"])
             self.tell(host, {"type": "tip", "address": STAGE, "handle": "ann_b", "source": "bio"})
@@ -353,6 +353,31 @@ class Wallet(unittest.TestCase):
         self.assertEqual(self.run_cli("status")["page"], [])
         self.assertTrue(self.run_cli("dismiss")["ok"])
         self.assertIsNone(self.run_cli("status")["request"])
+
+    def test_browser_github_page_and_tip(self):
+        host = self.browser()
+        try:
+            self.tell(host, {"type": "page", "items": [
+                {"address": MAIN, "handle": "ann/plug", "source": "manifest", "site": "github", "fork": True},
+                {"address": "8" + "A" * 94, "handle": "-bad-/x", "source": "nonsense", "site": "github", "fork": "yes"},
+                {"address": "8" + "B" * 94, "handle": "ann/..", "source": "readme", "site": "github"}]})
+            self.assertEqual(self.wait_page(3), [
+                {"address": MAIN, "handle": "ann/plug", "source": "manifest", "site": "github", "fork": True},
+                {"address": "8" + "A" * 94, "handle": "", "source": "readme", "site": "github", "fork": False},
+                {"address": "8" + "B" * 94, "handle": "", "source": "readme", "site": "github", "fork": False}])
+            self.tell(host, {"type": "tip", "address": MAIN, "handle": "ann/plug", "source": "manifest",
+                             "site": "github", "fork": True})
+            for _ in range(50):
+                request = self.run_cli("status")["request"]
+                if request:
+                    break
+                time.sleep(0.1)
+            self.assertEqual((request["address"], request["recipient"]), (MAIN, "ann/plug"))
+            self.assertEqual(request["description"], "address found in the repo's manifest.json, which is a fork, not verified")
+        finally:
+            host.stdin.close()
+            self.assertEqual(host.wait(timeout=10), 0)
+            host.stderr.close()
 
     def test_browser_other_extension_is_refused(self):
         host = self.browser("chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/")

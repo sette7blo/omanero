@@ -689,7 +689,7 @@ Panel {
             spacing: Style.spacing.md
             visible: root.request === null && root.st.page.length > 0
 
-            FieldLabel { text: "On the X page in front" }
+            FieldLabel { text: "On the page in front" }
             Repeater {
               model: root.st.page
 

@@ -13,6 +13,11 @@ Checked end to end in a headless Brave 157 against a fake X page (`tests/e2e/run
 and by hand on real X the same day: Tip controls, name badges, the lit bar icon and
 "Tip @name" in the panel all showed. `install.sh` loads it through the browser flags file.
 
+GitHub (2026-11-16, not yet released): the same extension reads a repo's `manifest.json`,
+`.github/FUNDING.yml` and README, and a profile's bio. The Tip control sits beside the
+Releases heading. Checked in headless Brave (`MODE=github tests/e2e/run.sh`) and seen on
+a real repo page the same day.
+
 xmr.bio's signed directory was looked at on 2026-11-15 and left out: 110 entries, one
 small operator, and it would be the extension's first network request.
 
@@ -48,7 +53,6 @@ RAWmakase; nobody ships it yet.
   needs an explicit decision.
 - Check the address checksum in the extension, so a mistyped address gets no Tip control.
 - Firefox build of the extension.
-- Tip control and lit icon on GitHub repository pages that show a Monero address.
 - An amount on the Receive QR code.
 - Translations: move the panel strings into `i18n/en.json`.
 
@@ -62,7 +66,8 @@ RAWmakase; nobody ships it yet.
 - No balance on the bar.
 - Uninstalling never deletes wallet files, and removing a wallet only moves them aside.
 - No local node. The plugin stays light.
-- The browser extension reads x.com and talks only to the wallet tool: no network
-  requests, no keys, no wallet logic in the browser.
+- The browser extension reads x.com and github.com and talks to the wallet tool. Its
+  only network requests are a repo's `manifest.json` and `FUNDING.yml`, from the repo
+  on screen, without cookies. No other requests, no keys, no wallet logic in the browser.
 - Text from a link, a web page or the wallet service is untrusted: plain text in the UI,
   separate arguments in commands.

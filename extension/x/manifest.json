@@ -1,15 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "Omanero for X",
-  "version": "0.4.0",
-  "description": "Shows a Tip control next to Monero addresses on X and hands them to the omanero wallet on your desktop. Holds no keys and makes no network requests.",
+  "name": "Omanero tips",
+  "version": "0.4.1",
+  "description": "Shows a Tip control next to Monero addresses on X and GitHub and hands them to the omanero wallet on your desktop. Holds no keys. Its only requests read a repo's manifest.json and FUNDING.yml while that repo is on screen.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEArRfOT+kwNJ+Ydxapxo396dmcvQZqibwoR+qsHGH9BT3fn3jPXgiZ+9aKKfQTvRttg6XboeHrqfn0kHhXBNbQ41XsswXwD/tx4eYP2q5ofizmZm5hUUMWp2hkUyC8VQ8x5VZB2rQbn+Mz276SZLSdG2OKcBREBi6wvbqy1lFbF+1Ej188onBgUQj8yiQ64mbP5OdeUsQ3rwpKu9ZEtHizU9fS7mfCnBj37dwL0aCxaz3nYKBIw/+In8/pm1oW2bWxfxlfK8augMe2E/oJXQEDWg9r022BwrXYSZJ+J29DFFpXOeos8M0P8qqHI40FY4wNXSRqNXDA3X6Xt0V/94v2OwIDAQAB",
   "permissions": ["nativeMessaging", "storage"],
-  "background": { "service_worker": "background.js" },
+  "host_permissions": ["https://raw.githubusercontent.com/*"],
+  "background": { "service_worker": "background-2.js" },
   "content_scripts": [
     {
       "matches": ["https://x.com/*", "https://twitter.com/*"],
-      "js": ["detect.js", "content.js"],
+      "js": ["detect.js", "pill.js", "content.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://github.com/*"],
+      "js": ["detect.js", "pill.js", "github.js"],
       "run_at": "document_idle"
     }
   ]
