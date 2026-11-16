@@ -7,11 +7,12 @@ project uses [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Security
-- The tool now makes whatever answers on the wallet port prove it holds the session
-  login before anything else is sent to it. Another user on the same machine could
-  take the port in the instant before `monero-wallet-rpc` bound it and be sent the
-  seed and password of a wallet being restored, or the password of one being created
-  or unlocked. Reported in the marketplace review.
+- Nothing is sent to the wallet port until the system confirms that the other end of
+  the connection belongs to you, and until it has proven it holds the session login.
+  Another user on the same machine could take the port in the instant before
+  `monero-wallet-rpc` bound it and be sent the seed and password of a wallet being
+  restored, or the password of one being created or unlocked. Reported in the
+  marketplace review.
 - Locking the wallet takes a newly created seed off the screen even when "I wrote it
   down" was never pressed, whether it is locked from the bar, the panel, a terminal or
   by the idle timer. `omanero seed` shows it again after unlocking.

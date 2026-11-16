@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 import unittest
+import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLI = os.path.join(os.path.dirname(HERE), "bin", "omanero")
@@ -131,6 +132,68 @@ class Pure(unittest.TestCase):
         self.assertIn("algorithm=MD5-sess,", M.digest_header(both[:1], "u", "p", "POST", "/json_rpc"))
         with self.assertRaises(M.RpcDown):
             M.digest_header(['Basic realm="r"'], "u", "p", "POST", "/json_rpc")
+
+
+class Owner(unittest.TestCase):
+    def setUp(self):
+        self.listener = socket.socket()
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(1)
+        self.port = self.listener.getsockname()[1]
+        self.received = []
+
+    def tearDown(self):
+        self.listener.close()
+
+    # Whatever arrives within a moment of the connection being made.
+    def collect(self):
+        accepted, _ = self.listener.accept()
+        accepted.settimeout(0.5)
+        try:
+            self.received.append(accepted.recv(65536))
+        except OSError:
+            self.received.append(b"")
+        accepted.close()
+
+    def refused(self, known, **patch):
+        thread = threading.Thread(target=self.collect)
+        thread.start()
+        link = M.Link(self.port, "password", 5)
+        try:
+            with unittest.mock.patch.multiple(M, **patch), self.assertRaises(M.RpcImpostor) as raised:
+                link.verify()
+        finally:
+            link.connection.close()
+        thread.join()
+        self.assertIn("not the wallet service" if known else "Could not confirm", str(raised.exception))
+        self.assertEqual(self.received, [b""])
+
+    def test_far_end_of_a_connection_is_ours(self):
+        with socket.create_connection(("127.0.0.1", self.port)) as sock:
+            accepted, _ = self.listener.accept()
+            self.assertEqual(M.peer_uid(sock), os.getuid())
+            accepted.close()
+
+    def test_a_connection_nobody_picks_up_counts_as_busy(self):
+        with socket.create_connection(("127.0.0.1", self.port)) as sock:
+            named = M.peer_uid(sock) != 0
+        self.listener.accept()[0].close()
+        if named:
+            self.skipTest("this kernel names the owner before the connection is picked up")
+        link = M.Link(self.port, "password", 0.3)
+        try:
+            with self.assertRaises(TimeoutError):
+                link.verify()
+        finally:
+            link.connection.close()
+
+    def test_nothing_is_sent_to_a_listener_owned_by_someone_else(self):
+        other = unittest.mock.Mock()
+        other.getuid.return_value = os.getuid() + 1
+        self.refused(True, os=other)
+
+    def test_nothing_is_sent_when_the_owner_cannot_be_read(self):
+        self.refused(False, peer_uid=lambda sock: None)
 
 
 class Wallet(unittest.TestCase):

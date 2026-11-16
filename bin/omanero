@@ -109,8 +109,9 @@ class RpcDown(Exception):
 
 
 class RpcImpostor(RpcDown):
-    def __init__(self, port):
-        super().__init__("Something that is not the wallet service is answering on port %d." % port)
+    def __init__(self, port, known=True):
+        super().__init__(("Something that is not the wallet service is answering on port %d." if known
+                          else "Could not confirm that the wallet service is what answers on port %d.") % port)
 
 
 # ----- Paths ---------------------------------------------------------------
@@ -440,6 +441,26 @@ def local_post(connection, body, authorization=""):
     return response.status, response.headers.get_all("WWW-Authenticate") or [], response.read(MAX_BODY)
 
 
+def hex_endpoint(address):
+    return "%08X:%04X" % (struct.unpack("=I", socket.inet_aton(address[0]))[0], address[1])
+
+
+# The user who owns the far end of a local connection, from the kernel's own
+# table of sockets, or None when it cannot be read.
+def peer_uid(sock):
+    local, remote = hex_endpoint(sock.getpeername()), hex_endpoint(sock.getsockname())
+    try:
+        with open("/proc/net/tcp") as handle:
+            rows = handle.read().splitlines()[1:]
+    except OSError:
+        return None
+    for row in rows:
+        fields = row.split()
+        if len(fields) > 7 and fields[1].upper() == local and fields[2].upper() == remote:
+            return clamp_int(fields[7], 0, 2 ** 32, None)
+    return None
+
+
 # One connection to the wallet service. The service counts requests per
 # challenge and hands out a new challenge after every refused answer.
 class Link:
@@ -448,7 +469,7 @@ class Link:
         # proxies. The service ties its login challenge to the connection, so
         # every answer has to go back on the same one.
         self.connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
-        self.port, self.password = port, password
+        self.port, self.password, self.timeout = port, password, timeout
         self.chosen, self.count = None, 0
 
     def post(self, body, genuine=True):
@@ -464,12 +485,36 @@ class Link:
 
     # Any local user can take the port in the moment between the check that it
     # is free and the service binding it, and then sits where the seed and the
-    # password are about to be sent. Digest login only proves this side to the
-    # listener, so the listener is made to prove itself first: it has to tell
-    # right answers from random ones, which takes the password. Only harmless
-    # requests go out until it has, and the real one follows on this same
-    # connection.
+    # password are about to be sent, or passes them on to the real service
+    # once that is up and reads along. So nothing is sent until the kernel
+    # says the far end of this very connection belongs to this user. Without
+    # that answer nothing is sent either.
+    def check_owner(self):
+        self.connection.connect()
+        deadline, unlisted = time.time() + self.timeout, 0
+        while True:
+            uid = peer_uid(self.connection.sock)
+            if uid == os.getuid():
+                return
+            if uid is None:
+                unlisted += 1
+                if unlisted >= 10:
+                    raise RpcImpostor(self.port, False)
+            elif uid != 0:
+                raise RpcImpostor(self.port)
+            elif time.time() >= deadline:
+                # Older kernels list a connection the service has not picked
+                # up yet as owned by nobody. A busy service looks like this.
+                raise TimeoutError()
+            time.sleep(0.05)
+
+    # Second check, in case the first can ever be fooled. Digest login only
+    # proves this side to the listener, so the listener is made to prove
+    # itself: it has to tell right answers from random ones, which takes the
+    # password. Only harmless requests go out until it has, and the real one
+    # follows on this same connection.
     def verify(self):
+        self.check_owner()
         probe = rpc_payload("get_version", None)
         status, _ = self.post(probe)
         if status != 401 or not self.chosen:

@@ -355,9 +355,9 @@ tests/             test_cli.py (against a fake wallet service), model.test.js, d
 ```
 
 While unlocked, `monero-wallet-rpc` runs on `127.0.0.1` behind a random login
-that changes every unlock. Before the tool sends it anything, whatever answers
-on that port has to prove it holds the login, so another program that got to the
-port first is told nothing. Passwords and seeds are passed on stdin, never on a
+that changes every unlock. Before the tool sends it anything, the system has to
+confirm that what answers on that port runs as you, and it has to prove it holds
+the login, so another user's program that got to the port first is told nothing. Passwords and seeds are passed on stdin, never on a
 command line. A payment is built and signed first, shown to you with its real
 fee, and only then broadcast, so what you confirm is exactly what is sent.
 
