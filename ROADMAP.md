@@ -17,11 +17,15 @@ xmr.bio's signed directory was looked at on 2026-11-15 and left out: 110 entries
 small operator, and it would be the extension's first network request.
 
 Tipping plugin authors (2026-11-15): the convention is `"funding": { "monero": "..." }`
-in a plugin's `manifest.json`, documented in the README. The Plugins tab reads installed
+in a plugin's `manifest.json`, documented in the README. The Authors tab reads installed
 manifests. The author's own plugins carry the field since 2026-11-15. Not yet seen on screen.
 
 Several wallets (2026-11-15): add, switch and remove in Settings and on the command line.
 Tested against the fake wallet service only; not yet seen on screen or with the real one.
+
+Apps (2026-11-16): `Monero::address` in an app's AppStream `<custom>` block, read from
+the installed metainfo files and listed in the Authors tab. Proposed to flea and
+RAWmakase; nobody ships it yet.
 
 ## Next, in order
 

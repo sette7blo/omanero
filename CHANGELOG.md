@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The Plugins tab is now **Authors** and also lists installed apps whose AppStream file
+  carries `<custom><value key="Monero::address">...</value></custom>`. The README explains
+  how app authors add it.
+
 ### Changed
 - While a wallet is created, restored or unlocked, the form's fields are locked and the
   button shows the progress with moving dots, instead of a field that looks typeable.
