@@ -70,3 +70,31 @@ test("one entry per address, bio first, capped", () => {
   assert.equal(D.unique(many).length, 5)
   assert.deepEqual(D.unique(null), [])
 })
+
+test("github paths", () => {
+  assert.deepEqual(D.githubPage("/ann"), { owner: "ann", repo: "" })
+  assert.deepEqual(D.githubPage("/ann/plug"), { owner: "ann", repo: "plug" })
+  assert.deepEqual(D.githubPage("/ann/plug/tree/main?x=1"), { owner: "ann", repo: "plug" })
+  assert.equal(D.githubName(D.githubPage("/ann/plug")), "ann/plug")
+  for (const path of ["/", "/settings", "/orgs/x", "/ann/plug/issues", "/ann/plug/blob/main/README.md",
+    "/-ann", "/ann/..", "/" + "a".repeat(40), "/marketplace/x"]) assert.equal(D.githubPage(path), null, path)
+})
+
+test("addresses a repo publishes", () => {
+  assert.equal(D.manifestAddress(JSON.stringify({ funding: { monero: MAIN } })), MAIN)
+  assert.equal(D.manifestAddress(JSON.stringify({ funding: { monero: " " + MAIN + " " } })), MAIN)
+  assert.equal(D.manifestAddress(JSON.stringify({ funding: { monero: MAIN + " " + SUB } })), "")
+  assert.equal(D.manifestAddress(JSON.stringify({ funding: "x" })), "")
+  assert.equal(D.manifestAddress("{not json"), "")
+  assert.equal(D.fundingAddress("github: [ann]\ncustom: [\"monero:" + MAIN + "?tx_amount=1\", \"https://x\"]"), MAIN)
+  assert.equal(D.fundingAddress("custom: monero://" + SUB), SUB)
+  assert.equal(D.fundingAddress("custom: " + MAIN), "")
+  assert.equal(D.fundingAddress(null), "")
+})
+
+test("structured sources rank first", () => {
+  const items = [
+    { address: MAIN, source: "readme" }, { address: SUB, source: "manifest" }, { address: MAIN, source: "funding" }
+  ]
+  assert.deepEqual(D.unique(items).map(i => i.source), ["manifest", "funding"])
+})

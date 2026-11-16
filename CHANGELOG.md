@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The browser extension works on GitHub too. On a repo's front page it reads the address
+  the repo publishes in `manifest.json` (`funding.monero`) or as a `monero:` link in
+  `.github/FUNDING.yml`, fetched once a day at most from the repo on screen, and finds
+  addresses in READMEs and profile bios. The Tip control sits beside the Releases
+  heading, also for a repo whose only address is in its README. The panel names the
+  repo and says when it is a fork.
+
 ## [v0.4.0] - 2026-11-16
 
 ### Added

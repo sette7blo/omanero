@@ -72,8 +72,8 @@ test("status: addresses seen on the X page", () => {
     { address: "nope", handle: "x", source: "post" }, null, "x"
   ] }))
   assert.deepEqual(st.page, [
-    { address: MAIN, handle: "ann_b", source: "bio" },
-    { address: "8" + "C".repeat(94), handle: "", source: "post" }
+    { address: MAIN, handle: "ann_b", source: "bio", site: "x" },
+    { address: "8" + "C".repeat(94), handle: "", source: "post", site: "x" }
   ])
   assert.equal(M.tipNames(st.page), "@ann_b, 8CCCCCCC...CCCCCCCC")
   assert.equal(M.tooltip(st), "Monero address on this page: @ann_b, 8CCCCCCC...CCCCCCCC")
@@ -148,6 +148,19 @@ test("tab keys", () => {
   assert.equal(M.nextTab("plugins", 1), "send")
   assert.equal(M.nextTab("send", -1), "plugins")
   assert.equal(M.nextTab("nope", 1), "receive")
+})
+
+test("addresses seen on GitHub", () => {
+  const st = M.parseStatus(status({ page: [
+    { address: MAIN, handle: "ann/plug", source: "manifest", site: "github", fork: true },
+    { address: MAIN, handle: "ann", source: "bio", site: "github" },
+    { address: MAIN, handle: "<b>/x", source: "nope", site: "github", fork: "yes" }
+  ] }))
+  assert.deepEqual(st.page[0], { address: MAIN, handle: "ann/plug", source: "manifest", site: "github", fork: true })
+  assert.deepEqual(st.page[2], { address: MAIN, handle: "", source: "readme", site: "github", fork: false })
+  assert.equal(M.tipNames(st.page), "ann/plug, ann, 4AAAAAAA...AAAAAAAA")
+  assert.match(M.tipNote(st.page[0]), /manifest.json of ann\/plug, which is a fork/)
+  assert.match(M.tipNote(st.page[1]), /^This address is from the GitHub bio of ann\. Nobody/)
 })
 
 test("levels and sync lines", () => {
