@@ -572,6 +572,41 @@ class Wallet(unittest.TestCase):
         self.assertFalse(self.run_cli("status")["unlocked"])
         self.assertFalse(os.path.exists(self.state + "/rpc.json"))
 
+    def test_nothing_secret_reaches_a_listener_without_the_password(self):
+        log = self.tmp + "/impostor.log"
+        for mode in ("accept", "reject", "open"):
+            env = dict(self.env, FAKE_IMPOSTOR=mode, FAKE_IMPOSTOR_LOG=log)
+            for command, data in (("create", {"password": "hunter2"}),
+                                  ("restore", {"password": "hunter2", "seed": SEED, "restoreHeight": "10"})):
+                got = self.run_cli(command, data=data, env=env)
+                self.assertFalse(got["ok"], (mode, command))
+                self.assertIn("not the wallet service", got["error"])
+                self.assertIn("Nothing secret was sent", got["error"])
+                self.assertFalse(os.path.exists(self.state + "/rpc.json"))
+            with open(log) as handle:
+                sent = handle.read()
+            self.assertNotIn("hunter2", sent)
+            self.assertNotIn("abbey", sent)
+            self.assertEqual({json.loads(line)["method"] for line in sent.splitlines()}, {"get_version"}, mode)
+        self.assertFalse(os.path.exists(self.tmp + "/data/omanero/mainnet/omanero.keys"))
+
+    def test_listener_check_tells_right_answers_from_random_ones(self):
+        self.create()
+        session = load(self.state + "/rpc.json")
+        link = M.Link(session["port"], session["password"], 5)
+        try:
+            link.verify()
+            self.assertEqual(link.post(M.rpc_payload("get_version", None), genuine=False)[0], 401)
+            self.assertEqual(link.post(M.rpc_payload("get_version", None))[0], 200)
+        finally:
+            link.connection.close()
+        wrong = M.Link(session["port"], "not the password", 5)
+        try:
+            with self.assertRaises(M.RpcImpostor):
+                wrong.verify()
+        finally:
+            wrong.connection.close()
+
     def test_service_that_will_not_start(self):
         env = dict(self.env, FAKE_REFUSE_START="1")
         got = self.run_cli("create", data={"password": "pw"}, env=env)
