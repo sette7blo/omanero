@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-11-16
+
 ### Added
 - The header names the open wallet when there is more than one, and so do the bar
   tooltip and the unlock field. On stagenet the balance line says `Stagenet`.
@@ -65,7 +67,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.4.0...HEAD
+[v0.4.0]: https://github.com/sette7blo/omanero/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/sette7blo/omanero/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/sette7blo/omanero/compare/v0.1.0...v0.2.0
 [v0.1.0]: https://github.com/sette7blo/omanero/releases/tag/v0.1.0

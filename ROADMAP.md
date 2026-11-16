@@ -2,7 +2,7 @@
 
 ## Where we are
 
-v0.3.0 released 2026-11-16. Checked on stagenet against a real
+v0.4.0 released 2026-11-16. Checked on stagenet against a real
 `monero-wallet-rpc` 0.18.5.4 on 2026-11-15: create, sync, lock, unlock, wrong password,
 restore by date, address checks, review with no funds, history, link request, seed.
 **Not yet checked: a real send** (needs stagenet coins) and the three mainnet nodes.
