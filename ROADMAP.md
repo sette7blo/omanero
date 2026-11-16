@@ -2,7 +2,7 @@
 
 ## Where we are
 
-v0.4.0 released 2026-11-16. Checked on stagenet against a real
+v0.5.0 released 2026-11-16. Checked on stagenet against a real
 `monero-wallet-rpc` 0.18.5.4 on 2026-11-15: create, sync, lock, unlock, wrong password,
 restore by date, address checks, review with no funds, history, link request, seed.
 **Not yet checked: a real send** (needs stagenet coins) and the three mainnet nodes.
@@ -13,7 +13,7 @@ Checked end to end in a headless Brave 157 against a fake X page (`tests/e2e/run
 and by hand on real X the same day: Tip controls, name badges, the lit bar icon and
 "Tip @name" in the panel all showed. `install.sh` loads it through the browser flags file.
 
-GitHub (2026-11-16, not yet released): the same extension reads a repo's `manifest.json`,
+GitHub (2026-11-16, v0.5.0): the same extension reads a repo's `manifest.json`,
 `.github/FUNDING.yml` and README, and a profile's bio. The Tip control sits beside the
 Releases heading. Checked in headless Brave (`MODE=github tests/e2e/run.sh`) and seen on
 a real repo page the same day.

@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-16
+
 ### Added
 - The browser extension works on GitHub too. On a repo's front page it reads the address
   the repo publishes in `manifest.json` (`funding.monero`) or as a `monero:` link in
@@ -75,7 +77,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/sette7blo/omanero/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/sette7blo/omanero/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/sette7blo/omanero/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/sette7blo/omanero/compare/v0.1.0...v0.2.0
