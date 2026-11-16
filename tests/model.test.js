@@ -123,6 +123,33 @@ test("several wallets", () => {
   assert.equal(M.walletNameProblem("savings-2", st.wallets), "")
 })
 
+test("which wallet, and which network, is on show", () => {
+  const one = M.parseStatus(status({}))
+  assert.equal(M.heroTitle(one), "Monero")
+  assert.equal(M.walletLabel(one), "")
+  assert.equal(M.tooltip(one), "Monero wallet: unlocked")
+  const two = M.parseStatus(status({ wallet: "tips", wallets: [{ name: "omanero", address: MAIN }, { name: "tips", address: MAIN }] }))
+  assert.equal(M.heroTitle(two), "tips")
+  assert.equal(M.tooltip(two), "Monero wallet: tips, unlocked")
+  assert.equal(M.tooltip(M.parseStatus(status({ wallet: "tips", unlocked: false,
+    wallets: [{ name: "omanero" }, { name: "tips" }] }))), "Monero wallet: tips, locked")
+  const stage = M.parseStatus(status({ network: "stagenet" }))
+  assert.equal(M.heroMeta(stage), "2.5 XMR \u00b7 Stagenet")
+  assert.equal(M.heroMeta(M.parseStatus(status({ network: "stagenet", unlocked: false }))), "Locked \u00b7 Stagenet")
+  assert.equal(M.tooltip(stage), "Monero wallet (stagenet): unlocked")
+  assert.equal(M.heroMeta(one), "2.5 XMR")
+  assert.equal(M.heroTitle(M.parseStatus(status({ walletExists: false, unlocked: false, wallets: [] }))), "Monero")
+})
+
+test("tab keys", () => {
+  assert.deepEqual(["1", "2", "3", "4"].map(M.tabForKey), ["send", "receive", "history", "plugins"])
+  for (const k of ["0", "5", "a", "", "1.0", " 1"]) assert.equal(M.tabForKey(k), "", k)
+  assert.equal(M.nextTab("send", 1), "receive")
+  assert.equal(M.nextTab("plugins", 1), "send")
+  assert.equal(M.nextTab("send", -1), "plugins")
+  assert.equal(M.nextTab("nope", 1), "receive")
+})
+
 test("levels and sync lines", () => {
   const at = patch => M.parseStatus(status(patch))
   assert.equal(M.level(at({ installed: false })), "missing")

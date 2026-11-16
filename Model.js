@@ -270,22 +270,49 @@ function tipNote(item) {
     + ". Nobody has verified it; check it before sending."
 }
 
+// The wallet's name matters only once there is more than one.
+function walletLabel(st) {
+  return st && st.walletExists && st.wallets.length > 1 ? st.wallet : ""
+}
+
+function heroTitle(st) {
+  return walletLabel(st) || "Monero"
+}
+
 function tooltip(st) {
   if (st && st.page.length > 0) return "Monero address on this page: " + tipNames(st.page)
   var lv = level(st)
+  var head = "Monero wallet" + (st && st.network === "stagenet" ? " (stagenet)" : "") + ": "
+    + (walletLabel(st) ? walletLabel(st) + ", " : "")
   if (lv === "missing") return "Monero wallet: wallet tools not installed"
-  if (lv === "setup") return "Monero wallet: not set up"
-  if (lv === "locked") return "Monero wallet: locked"
-  if (lv === "syncing") return "Monero wallet: syncing"
-  return "Monero wallet: unlocked"
+  if (lv === "setup") return head + "not set up"
+  if (lv === "locked") return head + "locked"
+  if (lv === "syncing") return head + "syncing"
+  return head + "unlocked"
 }
 
+// Stagenet is play money; it is named wherever the balance is, never mainnet.
 function heroMeta(st) {
   var lv = level(st)
+  var net = st && st.network === "stagenet" ? " \u00b7 Stagenet" : ""
   if (lv === "missing") return "Not installed"
-  if (lv === "setup") return "No wallet yet"
-  if (lv === "locked") return "Locked"
-  return st.balance + " XMR"
+  if (lv === "setup") return "No wallet yet" + net
+  if (lv === "locked") return "Locked" + net
+  return st.balance + " XMR" + net
+}
+
+// Number keys pick a tab; anything else is not a tab key.
+var TABS = ["send", "receive", "history", "plugins"]
+
+function tabForKey(text) {
+  var n = parseInt(text, 10)
+  return String(n) === text && n >= 1 && n <= TABS.length ? TABS[n - 1] : ""
+}
+
+function nextTab(tab, step) {
+  var i = TABS.indexOf(tab)
+  if (i === -1) i = 0
+  return TABS[(i + step + TABS.length) % TABS.length]
 }
 
 function networkLine(st) {
@@ -365,7 +392,8 @@ if (typeof module !== "undefined" && module.exports) {
     parseTransfers: parseTransfers, parseQr: parseQr, parsePage: parsePage, parsePlugins: parsePlugins,
     pluginSubtitle: pluginSubtitle,
     tipName: tipName, tipNames: tipNames, tipNote: tipNote, shortAddress: shortAddress, groupedAddress: groupedAddress,
-    syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine, walletNameProblem: walletNameProblem,
+    syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine, walletLabel: walletLabel, heroTitle: heroTitle,
+    tabForKey: tabForKey, nextTab: nextTab, walletNameProblem: walletNameProblem,
     passwordProblem: passwordProblem, seedProblem: seedProblem, sendProblem: sendProblem,
     timeAgo: timeAgo, transferRows: transferRows
   }

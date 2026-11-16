@@ -27,6 +27,10 @@ Panel {
   // Adding another wallet next to the ones that exist.
   property bool addingWallet: false
   property bool confirmRemove: false
+  // The short wallet list under the header, opened from its button or with W.
+  property bool pickingWallet: false
+  readonly property bool canPickWallet: st.walletExists && st.wallets.length > 1
+    && (view === "wallet" || view === "locked")
   property string appliedRequest: ""
 
   // Settings draft, filled when the settings view opens.
@@ -128,10 +132,24 @@ Panel {
   }
 
   function switchWallet(name) {
+    root.pickingWallet = false
     if (root.busy || !root.service || name === root.st.wallet) return
     clearMessages()
     root.resetSend()
     root.service.saveConfig({ wallet: name })
+  }
+
+  function stepTab(direction) {
+    if (root.view === "wallet" && !root.review) root.tab = Model.nextTab(root.tab, direction)
+  }
+
+  // 1 to 4 pick a tab, W opens the wallet list, L (with Shift) locks. Plain l
+  // belongs to the shell's h/l movement, which steps through the tabs.
+  function handleKey(text) {
+    var tab = Model.tabForKey(text)
+    if (tab !== "" && root.view === "wallet" && !root.review) { root.tab = tab; return }
+    if ((text === "w" || text === "W") && root.canPickWallet) { root.pickingWallet = !root.pickingWallet; return }
+    if (text === "L" && root.view === "wallet" && root.service && !root.busy) root.service.lock()
   }
 
   function submitUnlock() {
@@ -230,6 +248,7 @@ Panel {
         root.showQr = false
         root.addingWallet = false
         root.confirmRemove = false
+        root.pickingWallet = false
         root.clearSecrets()
       } else {
         root.applyRequest()
@@ -348,7 +367,13 @@ Panel {
     PanelKeyCatcher {
       anchors.fill: parent
       blocked: root.typing
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.pickingWallet) root.pickingWallet = false
+        else root.close()
+      }
+      onTabRequested: function(direction) { root.stepTab(direction) }
+      onMoveRequested: function(dx, dy) { if (dx !== 0) root.stepTab(dx) }
+      onTextKey: function(text, modifiers) { root.handleKey(text) }
     }
 
     Column {
@@ -357,7 +382,7 @@ Panel {
       spacing: Style.spacing.xxl
 
       PanelHero {
-        title: "Monero"
+        title: root.view === "wallet" || root.view === "locked" ? Model.heroTitle(root.st) : "Monero"
         meta: root.view === "settings" ? "Settings" : Model.heroMeta(root.st)
         detail: root.view === "wallet" ? Model.syncLine(root.st) : ""
         foreground: root.foreground
@@ -374,9 +399,17 @@ Panel {
             spacing: Style.spacing.md
 
             PanelActionButton {
+              visible: root.canPickWallet
+              iconText: "\u{f0584}"
+              tooltipText: root.pickingWallet ? "Close the wallet list" : "Switch wallet (W)"
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              onClicked: root.pickingWallet = !root.pickingWallet
+            }
+            PanelActionButton {
               visible: root.view === "wallet"
               iconText: "\u{f033e}"
-              tooltipText: "Lock"
+              tooltipText: "Lock (Shift+L)"
               foreground: root.foreground
               fontFamily: root.fontFamily
               onClicked: if (root.service && !root.busy) root.service.lock()
@@ -406,6 +439,29 @@ Panel {
 
         Body { text: "Omanero is installing the Monero wallet tools." }
         Note { text: "A terminal opens if your password is needed. Only the wallet part is used. No blockchain is downloaded and no node runs on this computer." }
+      }
+
+      // ---- Wallet list, under the header ----
+      Column {
+        width: parent.width
+        spacing: Style.spacing.md
+        visible: root.pickingWallet && root.canPickWallet
+
+        FieldLabel { text: "Switch to" }
+        Flow {
+          width: parent.width
+          spacing: Style.spacing.md
+          Repeater {
+            model: root.st.wallets
+            PanelButton {
+              required property var modelData
+              text: modelData.name
+              selected: modelData.name === root.st.wallet
+              onClicked: root.switchWallet(modelData.name)
+            }
+          }
+        }
+        Note { text: "Switching locks the open wallet. Each wallet has its own password." }
       }
 
       // ---- Create or restore ----
@@ -579,7 +635,7 @@ Panel {
         }
 
         Field {
-          label: "Wallet password"
+          label: Model.walletLabel(root.st) !== "" ? "Password for " + Model.walletLabel(root.st) : "Wallet password"
           TextField {
             id: unlockField
             width: parent.width
