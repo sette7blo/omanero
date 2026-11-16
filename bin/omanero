@@ -108,6 +108,12 @@ class RpcDown(Exception):
         self.timed_out = timed_out
 
 
+class RpcImpostor(RpcDown):
+    def __init__(self, port, known=True):
+        super().__init__(("Something that is not the wallet service is answering on port %d." if known
+                          else "Could not confirm that the wallet service is what answers on port %d.") % port)
+
+
 # ----- Paths ---------------------------------------------------------------
 
 def xdg(name, fallback):
@@ -346,6 +352,9 @@ def check_password(password):
 # ----- HTTP ----------------------------------------------------------------
 
 MAX_BODY = 8 * 1024 * 1024
+# A listener without the password passes one round in two, so all of them
+# about once in sixteen million tries.
+VERIFY_ROUNDS = 24
 
 
 def rpc_payload(method, params):
@@ -372,7 +381,7 @@ def md5_hex(text):
 # monero-wallet-rpc offers both MD5 and MD5-sess digest challenges. Answering
 # them here keeps the login out of every process listing and avoids depending
 # on which of the two a library happens to pick.
-def digest_header(challenges, user, password, method, path):
+def pick_challenge(challenges):
     chosen = None
     for challenge in challenges:
         if challenge[:7].lower() != "digest ":
@@ -390,14 +399,22 @@ def digest_header(challenges, user, password, method, path):
             break
     if chosen is None:
         raise RpcDown("the wallet service asked for a login this tool does not know")
+    return chosen
+
+
+# With genuine=False the answer is random and looks the same to anyone who does
+# not hold the password.
+def digest_answer(chosen, user, password, method, path, count=1, genuine=True):
     realm, nonce = chosen.get("realm", ""), chosen["nonce"]
-    cnonce, count = secrets.token_hex(8), "00000001"
+    cnonce, count = secrets.token_hex(8), "%08x" % count
     ha1 = md5_hex("%s:%s:%s" % (user, realm, password))
     if chosen["algorithm"] == "MD5-SESS":
         ha1 = md5_hex("%s:%s:%s" % (ha1, nonce, cnonce))
     ha2 = md5_hex("%s:%s" % (method, path))
     qop = "auth" if "auth" in [q.strip() for q in chosen.get("qop", "").split(",")] else ""
-    if qop:
+    if not genuine:
+        response = secrets.token_hex(16)
+    elif qop:
         response = md5_hex("%s:%s:%s:%s:%s:%s" % (ha1, nonce, count, cnonce, qop, ha2))
     else:
         response = md5_hex("%s:%s:%s" % (ha1, nonce, ha2))
@@ -411,6 +428,10 @@ def digest_header(challenges, user, password, method, path):
     return "Digest " + ", ".join(parts)
 
 
+def digest_header(challenges, user, password, method, path):
+    return digest_answer(pick_challenge(challenges), user, password, method, path)
+
+
 def local_post(connection, body, authorization=""):
     headers = {"Content-Type": "application/json"}
     if authorization:
@@ -420,26 +441,104 @@ def local_post(connection, body, authorization=""):
     return response.status, response.headers.get_all("WWW-Authenticate") or [], response.read(MAX_BODY)
 
 
+def hex_endpoint(address):
+    return "%08X:%04X" % (struct.unpack("=I", socket.inet_aton(address[0]))[0], address[1])
+
+
+# The user who owns the far end of a local connection, from the kernel's own
+# table of sockets, or None when it cannot be read.
+def peer_uid(sock):
+    local, remote = hex_endpoint(sock.getpeername()), hex_endpoint(sock.getsockname())
+    try:
+        with open("/proc/net/tcp") as handle:
+            rows = handle.read().splitlines()[1:]
+    except OSError:
+        return None
+    for row in rows:
+        fields = row.split()
+        if len(fields) > 7 and fields[1].upper() == local and fields[2].upper() == remote:
+            return clamp_int(fields[7], 0, 2 ** 32, None)
+    return None
+
+
+# One connection to the wallet service. The service counts requests per
+# challenge and hands out a new challenge after every refused answer.
+class Link:
+    def __init__(self, port, password, timeout):
+        # A direct connection: this never leaves the machine and ignores
+        # proxies. The service ties its login challenge to the connection, so
+        # every answer has to go back on the same one.
+        self.connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+        self.port, self.password, self.timeout = port, password, timeout
+        self.chosen, self.count = None, 0
+
+    def post(self, body, genuine=True):
+        authorization = ""
+        if self.chosen:
+            self.count += 1
+            authorization = digest_answer(self.chosen, RPC_USER, self.password, "POST", "/json_rpc",
+                                          self.count, genuine)
+        status, challenges, data = local_post(self.connection, body, authorization)
+        if status == 401:
+            self.chosen, self.count = pick_challenge(challenges), 0
+        return status, data
+
+    # Any local user can take the port in the moment between the check that it
+    # is free and the service binding it, and then sits where the seed and the
+    # password are about to be sent, or passes them on to the real service
+    # once that is up and reads along. So nothing is sent until the kernel
+    # says the far end of this very connection belongs to this user. Without
+    # that answer nothing is sent either.
+    def check_owner(self):
+        self.connection.connect()
+        deadline, unlisted = time.time() + self.timeout, 0
+        while True:
+            uid = peer_uid(self.connection.sock)
+            if uid == os.getuid():
+                return
+            if uid is None:
+                unlisted += 1
+                if unlisted >= 10:
+                    raise RpcImpostor(self.port, False)
+            elif uid != 0:
+                raise RpcImpostor(self.port)
+            elif time.time() >= deadline:
+                # Older kernels list a connection the service has not picked
+                # up yet as owned by nobody. A busy service looks like this.
+                raise TimeoutError()
+            time.sleep(0.05)
+
+    # Second check, in case the first can ever be fooled. Digest login only
+    # proves this side to the listener, so the listener is made to prove
+    # itself: it has to tell right answers from random ones, which takes the
+    # password. Only harmless requests go out until it has, and the real one
+    # follows on this same connection.
+    def verify(self):
+        self.check_owner()
+        probe = rpc_payload("get_version", None)
+        status, _ = self.post(probe)
+        if status != 401 or not self.chosen:
+            raise RpcImpostor(self.port)
+        for genuine in [secrets.randbits(1) == 1 for _ in range(VERIFY_ROUNDS)]:
+            status, _ = self.post(probe, genuine)
+            if status != (200 if genuine else 401):
+                raise RpcImpostor(self.port)
+
+
 def wallet_rpc(method, params=None, timeout=10):
     session = read_json(state_path("rpc.json"))
     if not session:
         raise RpcDown("wallet is not running")
-    body = rpc_payload(method, params)
-    # A direct connection: this never leaves the machine and ignores proxies.
-    # The service ties its login challenge to the connection, so the answer
-    # has to go back on the same one.
-    connection = http.client.HTTPConnection("127.0.0.1", int(session["port"]), timeout=timeout)
+    link = Link(int(session["port"]), str(session["password"]), timeout)
     try:
-        status, challenges, data = local_post(connection, body)
-        if status == 401:
-            header = digest_header(challenges, RPC_USER, str(session["password"]), "POST", "/json_rpc")
-            status, challenges, data = local_post(connection, body, header)
+        link.verify()
+        status, data = link.post(rpc_payload(method, params))
     except TimeoutError:
         raise RpcDown("timed out", True)
     except (OSError, http.client.HTTPException) as error:
         raise RpcDown(str(error))
     finally:
-        connection.close()
+        link.connection.close()
     if status != 200:
         raise RpcDown("HTTP %d" % status)
     return rpc_result(data)
@@ -606,6 +705,10 @@ def start_rpc(cfg):
         try:
             wallet_rpc("get_version", timeout=3)
             return
+        except RpcImpostor as error:
+            stop_rpc(ask=False)
+            raise Fail("%s Nothing secret was sent to it. If this happens again, set another port with: "
+                       "omanero config set rpcPort <port>" % error)
         except (RpcDown, RpcError):
             time.sleep(0.25)
     stop_rpc()
@@ -630,16 +733,16 @@ def wait_gone(pid, seconds):
     return False
 
 
-def stop_rpc():
+def stop_rpc(ask=True):
     pid = rpc_pid()
     if pid:
         # close_wallet saves the wallet file before the service exits.
-        for method, timeout in (("close_wallet", 60), ("stop_wallet", 15)):
+        for method, timeout in (("close_wallet", 60), ("stop_wallet", 15)) if ask else ():
             try:
                 wallet_rpc(method, timeout=timeout)
             except (RpcDown, RpcError):
                 pass
-        if not wait_gone(pid, 15):
+        if not wait_gone(pid, 15 if ask else 0):
             for sig, seconds in ((signal.SIGTERM, 10), (signal.SIGKILL, 5)):
                 try:
                     os.kill(pid, sig)

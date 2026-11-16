@@ -610,6 +610,7 @@ Panel {
           value: root.seedInfo ? String(root.seedInfo.restoreHeight) : ""
         }
         Note { text: "Keep this number with the words. Restoring asks for it." }
+        Note { text: "Locking the wallet takes the words off the screen. To see them again, unlock it and run omanero seed in a terminal." }
 
         PanelButton {
           text: "I wrote it down"

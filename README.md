@@ -46,7 +46,7 @@ Click the Monero icon on the bar.
 
 | Step | What happens |
 |---|---|
-| New wallet | Pick a password. The 25-word seed and the restore height are shown once: write both down. |
+| New wallet | Pick a password. The 25-word seed and the restore height are shown once: write both down. Locking the wallet takes them off the screen; `omanero seed` shows the seed again after unlocking. |
 | Restore from seed | Enter the 25 words, a restore height (a block number, or a date like `2024-03-15`) and a new password. The wallet then scans from that height, which can take a while for an old wallet. |
 | Unlock | Type the password. The wallet locks itself again after 30 idle minutes (changeable, 0 turns it off). |
 | Send | Enter an address and an amount, press Review, read the address, amount, fee and total, then Send. Nothing leaves the wallet before that last press. |
@@ -355,7 +355,9 @@ tests/             test_cli.py (against a fake wallet service), model.test.js, d
 ```
 
 While unlocked, `monero-wallet-rpc` runs on `127.0.0.1` behind a random login
-that changes every unlock. Passwords and seeds are passed on stdin, never on a
+that changes every unlock. Before the tool sends it anything, the system has to
+confirm that what answers on that port runs as you, and it has to prove it holds
+the login, so another user's program that got to the port first is told nothing. Passwords and seeds are passed on stdin, never on a
 command line. A payment is built and signed first, shown to you with its real
 fee, and only then broadcast, so what you confirm is exactly what is sent.
 

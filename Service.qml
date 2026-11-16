@@ -42,6 +42,9 @@ Item {
   property var queue: []
   property var current: null
   property string pendingInput: ""
+  // Set when a wallet is created while a status run is still out: that run
+  // looked before the wallet existed, so its "locked" says nothing about it.
+  property bool statusOutdated: false
 
   // --- Commands ------------------------------------------------------------
   // A name adds another wallet; without one the first wallet is made.
@@ -65,7 +68,11 @@ Item {
   function unlock(password) {
     enqueue("unlock", ["unlock"], { password: String(password || "") })
   }
+  // Locking also takes a new seed off the screen, written down or not: what
+  // is locked must not stay readable to whoever walks up next. `omanero seed`
+  // shows it again after unlocking.
   function lock() {
+    root.seedInfo = null
     root.review = null
     root.receipt = null
     root.transfers = []
@@ -124,8 +131,10 @@ Item {
       if (kind !== "history") root.error = res.error
       return
     }
-    if (kind === "create") root.seedInfo = Model.parseSeed(res)
-    else if (kind === "preview") root.review = Model.parseReview(res)
+    if (kind === "create") {
+      root.seedInfo = Model.parseSeed(res)
+      root.statusOutdated = statusProc.running
+    } else if (kind === "preview") root.review = Model.parseReview(res)
     else if (kind === "relay") {
       root.receipt = Model.parseReceipt(res)
       root.review = null
@@ -177,9 +186,13 @@ Item {
     stdout: StdioCollector { id: statusOut; waitForEnd: true }
     onExited: function(code) {
       var next = Model.parseStatus(String(statusOut.text || ""))
+      var outdated = root.statusOutdated
+      root.statusOutdated = false
       if (next) {
         if (JSON.stringify(next) !== JSON.stringify(root.status)) root.status = next
         if (!next.unlocked) {
+          // Locked from a terminal or by the idle timer.
+          if (!outdated) root.seedInfo = null
           root.review = null
           root.transfers = []
           root.transfersLoaded = false

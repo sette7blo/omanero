@@ -117,17 +117,24 @@ def call(method, params):
 
 class Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
+    # One write per reply; unbuffered, the body waits on the client's delayed
+    # acknowledgement of the headers.
+    wbufsize = 65536
 
     # Like the real service, a login challenge is only good on the connection
-    # it was issued on.
+    # it was issued on, a refused answer gets a new one, and requests under
+    # one challenge are counted.
     def setup(self):
         super().setup()
         self.nonce = secrets.token_hex(16)
+        self.count = 0
 
     def log_message(self, *args):
         pass
 
     def challenge(self):
+        self.nonce = secrets.token_hex(16)
+        self.count = 0
         self.send_response(401)
         mode = os.environ.get("FAKE_DIGEST", "both")
         if mode in ("both", "md5"):
@@ -153,11 +160,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ha1 = md5("%s:%s:%s" % (ha1, f["nonce"], f["cnonce"]))
         ha2 = md5("POST:%s" % self.path)
         expected = md5("%s:%s:%s:%s:%s:%s" % (ha1, f["nonce"], f["nc"], f["cnonce"], f["qop"], ha2))
-        return f.get("response") == expected
+        if f.get("response") != expected or int(f["nc"], 16) != self.count + 1:
+            return False
+        self.count += 1
+        return True
+
+    # Someone else's listener on the wallet port: it has no password, so it
+    # can only wave every login through, refuse every one, or ask for none.
+    # What it was sent is kept for the test to read.
+    def impostor(self, mode, body):
+        with open(os.environ["FAKE_IMPOSTOR_LOG"], "ab") as handle:
+            handle.write(body + b"\n")
+        if mode == "open":
+            return True
+        return mode == "accept" and self.headers.get("Authorization", "").startswith("Digest ")
 
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-        if not self.authorized():
+        mode = os.environ.get("FAKE_IMPOSTOR", "")
+        if not (self.impostor(mode, body) if mode else self.authorized()):
             return self.challenge()
         request = json.loads(body)
         result = call(request["method"], request.get("params") or {})
