@@ -193,7 +193,7 @@ function parsePlugins(result) {
     var homepage = typeof p.homepage === "string" && HOMEPAGE_RE.test(p.homepage) ? p.homepage : ""
     items.push({
       id: id, name: text(p.name) || id, author: text(p.author), address: to,
-      homepage: homepage, source: "plugin"
+      homepage: homepage, source: p.kind === "app" ? "app" : "plugin"
     })
   }
   return items
@@ -255,6 +255,11 @@ function tipNames(items) {
 // A page can show any address under any name, so the wording never claims
 // more than where the address was seen.
 function tipNote(item) {
+  if (item.source === "app") {
+    return "This address is from the AppStream file of the installed app " + item.name
+      + (item.homepage ? " (" + item.homepage.replace(/^https:\/\//, "") + ")" : "")
+      + ". Nobody has verified it; a modified package can carry someone else's address."
+  }
   if (item.source === "plugin") {
     return "This address is from the manifest of the installed plugin " + item.name
       + (item.homepage ? " (" + item.homepage.replace(/^https:\/\//, "") + ")" : "")

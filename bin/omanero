@@ -27,6 +27,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ElementTree
 
 PLUGIN_ID = "io.github.sette7blo.omanero"
 # Fixed by the "key" in extension/manifest.json.
@@ -72,6 +73,8 @@ MAX_HISTORY = 50
 MAX_PAGE_ITEMS = 5
 MAX_PLUGINS = 100
 MAX_MANIFEST_BYTES = 256 * 1024
+# The custom AppStream key an app's metainfo file can carry its address under.
+APPSTREAM_KEY = "Monero::address"
 MAX_BROWSER_MESSAGE = 64 * 1024
 
 ADDRESS_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{95}$|^[1-9A-HJ-NP-Za-km-z]{106}$")
@@ -1179,10 +1182,86 @@ def cmd_plugins(cfg):
             "id": plugin_id, "name": clean_text(manifest.get("name")) or plugin_id,
             "author": clean_text(manifest.get("author")),
             "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
-            "address": address,
+            "address": address, "kind": "plugin",
         })
+    for item in appstream_apps(cfg):
+        if len(found) < MAX_PLUGINS and not any(other["id"] == item["id"] for other in found):
+            found.append(item)
     found.sort(key=lambda item: item["name"].lower())
     return {"plugins": found}
+
+
+def metainfo_dirs():
+    # Where installed apps put their AppStream file: the XDG data dirs, each
+    # with metainfo/ and the older appdata/.
+    homes = [xdg("XDG_DATA_HOME", os.path.join(os.path.expanduser("~"), ".local", "share"))]
+    homes += [d for d in (os.environ.get("XDG_DATA_DIRS") or "/usr/local/share:/usr/share").split(":") if d]
+    out = []
+    for home in homes:
+        for leaf in ("metainfo", "appdata"):
+            path = os.path.join(home, leaf)
+            if path not in out:
+                out.append(path)
+    return out
+
+
+def untagged(element, name):
+    # The entry without xml:lang, which is the untranslated one.
+    for child in element.findall(name):
+        if not any(key.endswith("}lang") or key == "lang" for key in child.attrib):
+            return child
+    return None
+
+
+def appstream_apps(cfg):
+    # Installed apps whose AppStream file names a Monero address:
+    # <custom><value key="Monero::address">4...</value></custom>
+    found = []
+    for folder in metainfo_dirs():
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".xml") or len(found) >= MAX_PLUGINS:
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if os.path.getsize(path) > MAX_MANIFEST_BYTES:
+                    continue
+                with open(path, "rb") as handle:
+                    text = handle.read()
+            except OSError:
+                continue
+            # Only files that mention the key are parsed at all.
+            if APPSTREAM_KEY.encode() not in text or b"<!ENTITY" in text:
+                continue
+            try:
+                root = ElementTree.fromstring(text)
+            except ElementTree.ParseError:
+                continue
+            if root.tag != "component":
+                continue
+            value = next((v.text for v in root.findall("custom/value") if v.get("key") == APPSTREAM_KEY), "")
+            try:
+                address = check_address(value, cfg["network"])
+            except Fail:
+                continue
+            app_id = (root.findtext("id") or "").strip()
+            if not PLUGIN_ID_RE.match(app_id) or any(item["id"] == app_id for item in found):
+                continue
+            title = untagged(root, "name")
+            developer = untagged(root, "developer/name")
+            if developer is None:
+                developer = untagged(root, "developer_name")
+            homepage = next((u.text or "" for u in root.findall("url") if u.get("type") == "homepage"), "").strip()
+            found.append({
+                "id": app_id, "name": clean_text(title.text if title is not None else "") or app_id,
+                "author": clean_text(developer.text if developer is not None else ""),
+                "homepage": homepage if HOMEPAGE_RE.match(homepage) else "",
+                "address": address, "kind": "app",
+            })
+    return found
 
 
 def cmd_qr(cfg):
@@ -1446,7 +1525,7 @@ def print_human(command, result):
             print("  %s" % (item["homepage"] or item["id"]))
             print("  %s" % item["address"])
         if not result["plugins"]:
-            print("None of the installed plugins lists a Monero address.")
+            print("None of the installed plugins or apps lists a Monero address.")
         return
     if command == "qr":
         # Black on white whatever the terminal theme, or phones will not read it.
@@ -1494,7 +1573,7 @@ def build_parser():
     relay.add_argument("--id", default="")
     sub.add_parser("history", help="recent transfers")
     sub.add_parser("qr", help="show the wallet address as a QR code")
-    sub.add_parser("plugins", help="installed Omarchy plugins whose author can be tipped")
+    sub.add_parser("plugins", help="installed plugins and apps whose author can be tipped")
     sub.add_parser("seed", help="show the seed of the unlocked wallet")
     uri = sub.add_parser("uri", help="open a monero: link in the panel")
     uri.add_argument("uri")

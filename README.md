@@ -146,21 +146,25 @@ its own.
 
 The same panel answers any `monero:` link, from any site or app.
 
-## Tipping plugin authors
+## Tipping plugin and app authors
 
-The **Plugins** tab lists the Omarchy plugins installed on this machine whose
-author has published a Monero address, each with a **Tip** button. It reads
-the manifests already on disk; nothing is fetched.
+The **Authors** tab lists the Omarchy plugins and the apps installed on this
+machine whose author has published a Monero address, each with a **Tip**
+button. It reads files already on disk; nothing is fetched.
 
-The address is whatever the installed copy says. A fork or a tampered copy
-can carry someone else's address, so the list shows where each plugin came
-from, and the send form says the address is not verified.
+- Plugins publish the address in their `manifest.json`.
+- Apps publish it in their AppStream file, the standard metadata file Linux
+  apps ship for software centres.
 
-![Plugins: installed plugins with a published address, where each one came from, and Tip](docs/plugins.png)
+The address is whatever the installed copy says. A fork, a tampered copy or a
+modified package can carry someone else's address, so the list shows where
+each one came from, and the send form says the address is not verified.
+
+![The Authors tab: installed plugins with a published address, where each one came from, and Tip](docs/plugins.png)
 
 ### For plugin authors
 
-The Plugins tab reads each installed plugin's `manifest.json`. This is enough
+The Authors tab reads each installed plugin's `manifest.json`. This is enough
 to show a row with **Tip**:
 
 ```json
@@ -196,6 +200,64 @@ Omarchy ignores fields it does not know, so a plugin with `funding` still
 validates and loads. The address is not checked against the author. The row
 shows the homepage so the sender can see where that copy came from.
 
+### For app authors: AppStream
+
+Apps that are not Omarchy plugins, a file manager or a photo editor for
+instance, can publish their address in their AppStream file. AppStream is the
+metadata standard GNOME Software, KDE Discover and Flathub read. Most packages
+install it as `/usr/share/metainfo/<app id>.metainfo.xml`.
+
+AppStream has a `<custom>` block for values the standard does not cover, which
+any tool reading AppStream may use. Add one value to it:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.example.yourapp</id>
+  <name>Your app</name>
+  <summary>What it does</summary>
+  <description>
+    <p>A few sentences on what the app does and who it is for.</p>
+  </description>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="com.example">
+    <name>yourname</name>
+  </developer>
+  <url type="homepage">https://github.com/you/yourapp</url>
+  <url type="donation">https://github.com/sponsors/you</url>
+  <launchable type="desktop-id">com.example.yourapp.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <custom>
+    <value key="Monero::address">4...</value>
+  </custom>
+</component>
+```
+
+- `Monero::address` is the key omanero looks for. The value follows the same
+  rules as the plugin field above: one address, on the network the wallet is
+  using.
+- `<id>`, the untranslated `<name>`, `<developer><name>` (or the older
+  `<developer_name>`) and `<url type="homepage">` are what the row shows. The
+  homepage has to be an `https://` URL.
+- Keep `<url type="donation">` for your usual donate page. The standard says it
+  points to a web page, so the address goes in `<custom>` and not there.
+- An app that already ships an AppStream file only needs the `<custom>` block.
+  Check the file with `appstreamcli validate yourapp.metainfo.xml`; the example
+  above passes, and the `<custom>` block adds no warnings.
+- The package has to install the file. If you package the app yourself, or a
+  distribution packages it for you, make sure the build copies it to
+  `/usr/share/metainfo/`. A package built from a release binary may not pick
+  it up on its own.
+- omanero reads `metainfo/` and `appdata/` under `~/.local/share` and the
+  system data folders (`/usr/local/share`, `/usr/share`, or `$XDG_DATA_DIRS`).
+  Only files that mention `Monero::address` are opened. Files with inline
+  entity definitions are skipped.
+
+App catalogues such as Flathub may leave `<custom>` values out of what they
+publish. The file installed on the machine keeps it, and that is the one
+omanero reads.
+
 ## Command line
 
 ```sh
@@ -210,7 +272,7 @@ omanero forget tips            # take it out; the files are moved aside
 omanero send <address> <amount>   # shows the fee and asks before sending
 omanero history
 omanero qr                     # the wallet address as a QR code
-omanero plugins                # installed plugins whose author can be tipped
+omanero plugins                # installed plugins and apps whose author can be tipped
 omanero seed                   # show the seed of the unlocked wallet
 omanero config                 # show settings
 omanero config set node node.sethforprivacy.com:443

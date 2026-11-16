@@ -149,7 +149,7 @@ class Wallet(unittest.TestCase):
         self.env = dict(os.environ)
         self.env.update({
             "XDG_CONFIG_HOME": self.tmp + "/config", "XDG_STATE_HOME": self.tmp + "/state",
-            "XDG_DATA_HOME": self.tmp + "/data", "OMANERO_WALLET_RPC": FAKE, "PATH": "/usr/bin:/bin",
+            "XDG_DATA_HOME": self.tmp + "/data", "XDG_DATA_DIRS": self.tmp + "/system", "OMANERO_WALLET_RPC": FAKE, "PATH": "/usr/bin:/bin",
             "PYTHONDONTWRITEBYTECODE": "1", "OMANERO_NO_SUMMON": "1",
         })
         self.env.pop("FAKE_DIGEST", None)
@@ -402,9 +402,9 @@ class Wallet(unittest.TestCase):
         got = self.run_cli("plugins")["plugins"]
         self.assertEqual([p["id"] for p in got], ["io.example.alpha", "io.example.zeta"])
         self.assertEqual(got[0], {"id": "io.example.alpha", "name": "io.example.alpha", "author": "",
-                                  "homepage": "", "address": "8" + "A" * 94})
+                                  "homepage": "", "address": "8" + "A" * 94, "kind": "plugin"})
         self.assertEqual(got[1], {"id": "io.example.zeta", "name": "Zeta Bar", "author": "<b>Zed</b>",
-                                  "homepage": "https://github.com/zed/zeta", "address": MAIN})
+                                  "homepage": "https://github.com/zed/zeta", "address": MAIN, "kind": "plugin"})
 
     def test_several_wallets(self):
         folder = self.tmp + "/data/omanero/mainnet"
@@ -461,6 +461,44 @@ class Wallet(unittest.TestCase):
         st = self.run_cli("status")
         self.assertEqual((st["walletExists"], st["wallets"], st["wallet"]), (False, [], "omanero"))
         self.assertEqual(len(os.listdir(folder + "/removed")), 3)
+
+    def test_apps_with_an_appstream_address(self):
+        system = self.tmp + "/system/metainfo"
+        os.makedirs(system)
+        os.makedirs(self.tmp + "/data/appdata")
+
+        def app(path, body):
+            with open(path, "w") as handle:
+                handle.write('<?xml version="1.0" encoding="UTF-8"?>\n' + body)
+
+        good = ('<component type="desktop-application"><id>com.example.flea</id>'
+                '<name>Flea</name><name xml:lang="de">Floh</name>'
+                '<developer id="x"><name>Ann</name></developer>'
+                '<url type="homepage">https://github.com/ann/flea</url>'
+                '<custom><value key="Other::thing">x</value><value key="Monero::address">%s</value></custom>'
+                '</component>' % MAIN)
+        app(system + "/com.example.flea.metainfo.xml", good)
+        app(self.tmp + "/data/appdata/old.appdata.xml",
+            '<component><id>org.example.old</id><developer_name>Bo</developer_name>'
+            '<url type="homepage">http://insecure.example</url>'
+            '<custom><value key="Monero::address">%s</value></custom></component>' % ("8" + "A" * 94))
+        app(system + "/stage.metainfo.xml",
+            '<component><id>org.example.stage</id><custom><value key="Monero::address">%s</value></custom></component>' % STAGE)
+        app(system + "/plain.metainfo.xml", '<component><id>org.example.plain</id><name>Plain</name></component>')
+        app(system + "/broken.metainfo.xml", '<component><id>org.example.broken</id><custom><value key="Monero::address">')
+        app(system + "/entity.metainfo.xml",
+            '<!DOCTYPE c [<!ENTITY a "%s">]><component><id>org.example.entity</id>'
+            '<custom><value key="Monero::address">&a;</value></custom></component>' % MAIN)
+        app(system + "/badid.metainfo.xml",
+            '<component><id>../x</id><custom><value key="Monero::address">%s</value></custom></component>' % MAIN)
+        app(system + "/notes.txt", "Monero::address " + MAIN)
+
+        got = self.run_cli("plugins")["plugins"]
+        self.assertEqual([p["id"] for p in got], ["com.example.flea", "org.example.old"])
+        self.assertEqual(got[0], {"id": "com.example.flea", "name": "Flea", "author": "Ann",
+                                  "homepage": "https://github.com/ann/flea", "address": MAIN, "kind": "app"})
+        self.assertEqual(got[1], {"id": "org.example.old", "name": "org.example.old", "author": "Bo",
+                                  "homepage": "", "address": "8" + "A" * 94, "kind": "app"})
 
     def test_link_request(self):
         got = self.run_cli("uri", "monero:%s?tx_amount=0.02&tx_description=thanks" % MAIN)

@@ -611,7 +611,7 @@ Panel {
             { value: "send", label: "Send" },
             { value: "receive", label: "Receive" },
             { value: "history", label: "History" },
-            { value: "plugins", label: "Plugins" }
+            { value: "plugins", label: "Authors" }
           ]
           value: root.tab
           fontSize: Style.font.bodySmall
@@ -894,7 +894,7 @@ Panel {
           }
         }
 
-        // -- Plugins: tip the authors of what is installed
+        // -- Authors: tip the authors of the plugins and apps that are installed
         Column {
           width: parent.width
           spacing: Style.spacing.lg
@@ -953,9 +953,9 @@ Panel {
             visible: pluginList.count === 0
             color: root.dim
             text: root.service && root.service.pluginsLoaded
-              ? "None of your installed plugins lists a Monero address yet." : "Loading."
+              ? "None of your installed plugins or apps lists a Monero address yet." : "Loading."
           }
-          Note { text: "A plugin author can be tipped when the plugin's manifest.json has a line \"funding\": { \"monero\": \"address\" }." }
+          Note { text: "Plugins list an address in manifest.json, apps in their AppStream file. The README explains both." }
         }
       }
 

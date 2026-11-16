@@ -99,6 +99,10 @@ test("plugins with a funding line", () => {
   assert.equal(items[1].homepage, "")
   assert.equal(M.pluginSubtitle(items[0]), "by Zed, github.com/zed/zeta")
   assert.equal(M.pluginSubtitle(items[1]), "by 5, io.example.alpha")
+  const apps = M.parsePlugins({ plugins: [{ id: "com.example.flea", name: "Flea", author: "Ann", address: MAIN,
+    homepage: "https://github.com/ann/flea", kind: "app" }] })
+  assert.equal(apps[0].source, "app")
+  assert.match(M.tipNote(apps[0]), /AppStream file of the installed app Flea \(github.com\/ann\/flea\)\. Nobody has verified it/)
   assert.match(M.tipNote(items[0]), /manifest of the installed plugin Zeta \(github.com\/zed\/zeta\)\. Nobody has verified it/)
   assert.deepEqual(M.parsePlugins({}), [])
 })
