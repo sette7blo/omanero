@@ -61,6 +61,21 @@ Click the Monero icon on the bar.
 
 Middle-click the bar icon to lock. Right-click opens this file.
 
+The header names what is open. With more than one wallet, its title is the
+wallet's name instead of "Monero"; the bar icon's tooltip says it too. On
+stagenet the balance reads `2.5 XMR · Stagenet`, so play money never looks
+like the real thing.
+
+Keys, while no text field has the cursor:
+
+| Key | Does |
+|---|---|
+| `1` `2` `3` `4` | Send, Receive, History, Authors |
+| `Tab`, `Shift+Tab`, `h` `l`, Left Right | Previous or next tab |
+| `W` | Show or hide the list of wallets, with more than one |
+| `Shift+L` | Lock |
+| `Esc` | Close the wallet list, or the panel |
+
 A new or restored wallet has to catch up with the network before it can send.
 Even a brand-new wallet walks the list of past blocks once, which takes from a
 few minutes to a quarter of an hour depending on the node. The panel shows how
@@ -74,7 +89,8 @@ Settings has a **Wallet** section:
 - **Add a wallet** creates or restores another one under a name you choose.
   It has its own seed and password, and becomes the wallet in use.
 - With more than one, press a wallet's name to switch. The current one is
-  locked first.
+  locked first. The wallet button in the header, or `W`, shows the same list
+  without going into Settings.
 - **Remove this wallet** takes it out of omanero. Its files are moved to
   `~/.local/share/omanero/<network>/removed/`, never deleted, but to reach the
   money again you need its 25-word seed, so write that down first.

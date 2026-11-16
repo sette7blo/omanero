@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- The header names the open wallet when there is more than one, and so do the bar
+  tooltip and the unlock field. On stagenet the balance line says `Stagenet`.
+- A wallet button in the header, or `W`, lists the wallets to switch to.
+- Keys: `1` to `4` pick a tab, `Tab` and `h`/`l` step through them, `Shift+L` locks.
+
 ## [v0.3.0] - 2026-11-16
 
 ### Added
