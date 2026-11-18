@@ -2,7 +2,8 @@
 
 ## Where we are
 
-v0.5.1 released 2026-11-16 (fixes the two findings of the marketplace review). Checked on stagenet against a real
+v0.5.2 released 2026-11-18 (unlocking about three times faster; v0.5.1 fixed the two findings of the
+marketplace review). Checked on stagenet against a real
 `monero-wallet-rpc` 0.18.5.4 on 2026-11-15: create, sync, lock, unlock, wrong password,
 restore by date, address checks, review with no funds, history, link request, seed.
 **Not yet checked: a real send** (needs stagenet coins) and the three mainnet nodes.

@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.2] - 2026-11-18
+
 ### Fixed
 - Unlocking is about three times faster. `monero-wallet-rpc` made itself a new TLS
   certificate for every connection, 4 to 12 seconds each on some machines. Its local
@@ -99,7 +101,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.1...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.2...HEAD
+[v0.5.2]: https://github.com/sette7blo/omanero/compare/v0.5.1...v0.5.2
 [v0.5.1]: https://github.com/sette7blo/omanero/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/sette7blo/omanero/compare/v0.4.0...v0.5.0
 [v0.4.0]: https://github.com/sette7blo/omanero/compare/v0.3.0...v0.4.0
