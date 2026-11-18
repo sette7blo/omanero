@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- Unlocking is about three times faster. `monero-wallet-rpc` made itself a new TLS
+  certificate for every connection, 4 to 12 seconds each on some machines. Its local
+  port no longer uses TLS (it only listens on 127.0.0.1), and the node connection gets a
+  certificate made by `openssl` in milliseconds, new at each unlock so the node cannot
+  link two sessions by it. Without `openssl` it works as before.
+- After unlocking, the panel no longer shows the password field again for a few seconds
+  before the wallet appears.
+
 ## [v0.5.1] - 2026-11-16
 
 ### Security

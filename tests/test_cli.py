@@ -279,7 +279,20 @@ class Wallet(unittest.TestCase):
         self.assertNotIn(session["password"], args)
         self.assertNotIn("hunter2", args)
         with open(self.state + "/rpc.conf") as handle:
-            self.assertIn("rpc-bind-ip=127.0.0.1", handle.read())
+            conf = handle.read()
+        self.assertIn("rpc-bind-ip=127.0.0.1", conf)
+        # No TLS on the local service; a ready-made certificate for the node.
+        self.assertIn("rpc-ssl=disabled", conf)
+        self.assertIn("daemon-ssl-certificate=" + self.state + "/node-tls.crt", conf)
+        with open(self.state + "/node-tls.crt") as handle:
+            first = handle.read()
+        self.assertIn("BEGIN CERTIFICATE", first)
+        # Each start makes a new one, and locking takes it away.
+        self.run_cli("lock")
+        self.assertFalse(os.path.exists(self.state + "/node-tls.key"))
+        self.assertTrue(self.run_cli("unlock", data={"password": "hunter2"})["ok"])
+        with open(self.state + "/node-tls.crt") as handle:
+            self.assertNotEqual(handle.read(), first)
 
     def test_sess_only_login(self):
         env = dict(self.env, FAKE_DIGEST="sess")
