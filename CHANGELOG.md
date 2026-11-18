@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- `uninstall.sh` locks the wallet with the plugin's own `bin/omanero`, never with
+  whatever is at `~/.local/bin/omanero`.
+- The `monero:` link handler is registered only when `omanero.desktop` is the plugin's
+  own launcher link, also with `--take-links`. When that name belongs to another
+  launcher, setup leaves the handler alone and says so, and `uninstall.sh` leaves a
+  handler entry naming it in place.
+
 ## [v0.5.4] - 2026-11-18
 
 ### Fixed
