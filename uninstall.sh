@@ -30,8 +30,9 @@ remove_link() {
 }
 
 # Saves the wallet and stops the wallet service before anything is unlinked.
-if [[ -x "$CLI_LINK" ]]; then
-  "$CLI_LINK" lock >/dev/null 2>&1 || log "could not lock the wallet; check for a running monero-wallet-rpc"
+# Always the plugin's own command: ~/.local/bin/omanero may be another program.
+if [[ -x "$PROJECT_DIR/bin/omanero" ]]; then
+  "$PROJECT_DIR/bin/omanero" lock >/dev/null 2>&1 || log "could not lock the wallet; check for a running monero-wallet-rpc"
 fi
 
 if command -v omarchy >/dev/null 2>&1; then
@@ -41,11 +42,15 @@ fi
 EXTENSION_DIR=""
 [[ -L "$PLUGIN_LINK" ]] && EXTENSION_DIR="$(readlink -f "$PLUGIN_LINK")/extension"
 
+# The handler names omanero.desktop; it is ours only if that launcher was.
+OWN_DESKTOP=false
+[[ -L "$DESKTOP_LINK" && "$(readlink -m "$DESKTOP_LINK")" == "$PROJECT_DIR/"* ]] && OWN_DESKTOP=true
+
 remove_link "$PLUGIN_LINK"
 remove_link "$CLI_LINK"
 remove_link "$DESKTOP_LINK"
 
-if [[ -f "$MIMEAPPS" ]] && grep -q '^x-scheme-handler/monero=omanero\.desktop;\?$' "$MIMEAPPS"; then
+if $OWN_DESKTOP && [[ -f "$MIMEAPPS" ]] && grep -q '^x-scheme-handler/monero=omanero\.desktop;\?$' "$MIMEAPPS"; then
   sed -i '/^x-scheme-handler\/monero=omanero\.desktop;\?$/d' "$MIMEAPPS"
   log "monero: links no longer open in omanero"
 fi

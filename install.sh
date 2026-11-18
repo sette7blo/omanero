@@ -82,6 +82,12 @@ in_place() {
   [[ -e "$1" || -L "$1" ]]
 }
 
+# The monero: handler is registered by file name, so it is set only when that
+# name is this plugin's own launcher link.
+desktop_ours() {
+  [[ -L "$DESKTOP_LINK" && "$(readlink -f "$DESKTOP_LINK")" == "$(readlink -f "$PROJECT_DIR/omanero.desktop")" ]]
+}
+
 # Arch package names for the commands the wallet uses. A copy already on PATH,
 # including one placed in ~/.local/bin, counts as installed.
 missing_packages() {
@@ -141,7 +147,7 @@ setup_complete() {
     render_desktop | cmp -s - "$PROJECT_DIR/omanero.desktop" || return 1
     in_place "$DESKTOP_LINK" || return 1
   fi
-  if command -v xdg-mime >/dev/null 2>&1; then
+  if desktop_ours && command -v xdg-mime >/dev/null 2>&1; then
     current="$(xdg-mime query default "$SCHEME" 2>/dev/null || true)"
     [[ -n $current ]] || return 1
   fi
@@ -199,6 +205,10 @@ install_desktop() {
 # Clicking "Open in wallet" on a monero: link should land in the panel.
 register_links() {
   command -v xdg-mime >/dev/null 2>&1 || { log "xdg-mime not found; monero: links are not registered"; return; }
+  if ! desktop_ours; then
+    log "monero: links are not registered: $DESKTOP_LINK is not this plugin's launcher"
+    return
+  fi
   local current
   current="$(xdg-mime query default "$SCHEME" 2>/dev/null || true)"
   if [[ -z "$current" || "$current" == "omanero.desktop" ]] || $TAKE_LINKS; then
