@@ -681,7 +681,11 @@ def start_rpc(cfg):
         "daemon-address=" + active_node(cfg),
         "log-file=" + state_path("wallet-rpc-internal.log"),
         "log-level=0",
+        "rpc-ssl=disabled",
     ]
+    tls = node_tls_files()
+    if tls:
+        lines += ["daemon-ssl-private-key=" + tls[0], "daemon-ssl-certificate=" + tls[1]]
     if cfg["network"] != "mainnet":
         lines.append(cfg["network"] + "=1")
     write_private(state_path("rpc.conf"), "\n".join(lines) + "\n")
@@ -715,8 +719,33 @@ def start_rpc(cfg):
     raise Fail("The wallet service did not start in time. " + log_tail())
 
 
+# monero-wallet-rpc makes itself a TLS certificate for every connection that
+# can use TLS, and each one took 4 to 12 seconds here, about two thirds of an
+# unlock. Its own server is on 127.0.0.1 only, so TLS is off there; for the
+# node it gets a certificate openssl makes in milliseconds. A new one each
+# start, so the node cannot tell two sessions apart by it.
+def node_tls_files():
+    tool = shutil.which("openssl")
+    if not tool:
+        return None
+    key, cert = state_path("node-tls.key"), state_path("node-tls.crt")
+    for path in (key, cert):
+        remove(path)
+    quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+             "timeout": 20, "check": True, "preexec_fn": lambda: os.umask(0o077)}
+    try:
+        subprocess.run([tool, "ecparam", "-genkey", "-name", "prime256v1", "-noout", "-out", key], **quiet)
+        subprocess.run([tool, "req", "-new", "-x509", "-key", key, "-out", cert, "-days", "30",
+                        "-subj", "/CN=localhost"], **quiet)
+    except (OSError, subprocess.SubprocessError):
+        for path in (key, cert):
+            remove(path)
+        return None
+    return key, cert
+
+
 def cleanup_rpc_files():
-    for name in ("rpc.json", "rpc.conf", "session.json", "pending.json"):
+    for name in ("rpc.json", "rpc.conf", "session.json", "pending.json", "node-tls.key", "node-tls.crt"):
         remove(state_path(name))
 
 

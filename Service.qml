@@ -45,6 +45,13 @@ Item {
   // Set when a wallet is created while a status run is still out: that run
   // looked before the wallet existed, so its "locked" says nothing about it.
   property bool statusOutdated: false
+  // After an unlock the status still says "locked" until the next status
+  // run is back, which takes a few seconds while the wallet catches up. Until
+  // then the panel keeps saying it is opening instead of showing the
+  // password field again.
+  property bool opening: false
+  // A status run already out when the unlock ended looked before it.
+  property bool openingStale: false
 
   // --- Commands ------------------------------------------------------------
   // A name adds another wallet; without one the first wallet is made.
@@ -171,8 +178,10 @@ Item {
       var kind = root.current ? root.current.kind : ""
       var res = Model.parseResult(String(cmdOut.text || ""))
       root.current = null
-      root.busy = false
-      root.busyKind = ""
+      root.opening = kind === "unlock" && res.ok === true
+      root.openingStale = root.opening && statusProc.running
+      root.busy = root.opening
+      root.busyKind = root.opening ? "unlock" : ""
       root.handle(kind, res)
       root.finished(kind, res.ok === true)
       root.refresh()
@@ -188,6 +197,19 @@ Item {
       var next = Model.parseStatus(String(statusOut.text || ""))
       var outdated = root.statusOutdated
       root.statusOutdated = false
+      if (root.opening && root.openingStale) {
+        root.openingStale = false
+        root.loaded = true
+        Qt.callLater(root.refresh)
+        return
+      }
+      if (root.opening) {
+        root.opening = false
+        if (!cmdProc.running) {
+          root.busy = false
+          root.busyKind = ""
+        }
+      }
       if (next) {
         if (JSON.stringify(next) !== JSON.stringify(root.status)) root.status = next
         if (!next.unlocked) {
