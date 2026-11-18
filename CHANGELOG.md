@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.6] - 2026-11-18
+
 ### Fixed
 - The browser setup touches only what belongs to this plugin folder. The installer no
   longer overwrites a native messaging registration (`NativeMessagingHosts/io.github.sette7blo.omanero.json`)
@@ -139,7 +141,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.6...HEAD
+[v0.5.6]: https://github.com/sette7blo/omanero/compare/v0.5.5...v0.5.6
 [v0.5.5]: https://github.com/sette7blo/omanero/compare/v0.5.4...v0.5.5
 [v0.5.4]: https://github.com/sette7blo/omanero/compare/v0.5.3...v0.5.4
 [v0.5.3]: https://github.com/sette7blo/omanero/compare/v0.5.2...v0.5.3
