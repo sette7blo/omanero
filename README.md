@@ -134,6 +134,9 @@ what each GitHub repo it looked up publishes.
 The installer adds the extension to the browser flags files Omarchy already
 uses, including Chromium, Brave, Chrome, and Edge, and writes the link that
 lets it reach the wallet tool. Restart the browser once after installing.
+Other entries in the `--load-extension` list are kept as they are, and a link
+file of the same name that belongs to something else is left alone. The
+uninstaller removes only the entries and link files of this plugin folder.
 
 It works in your main browser profile, including Omarchy's web apps. A browser
 started on a profile of its own, such as a web app popover with a separate

@@ -17,19 +17,8 @@ DESKTOP_LINK="$DATA_HOME/applications/omanero.desktop"
 SCHEME="x-scheme-handler/monero"
 # Fixed by the "key" in extension/x/manifest.json.
 EXTENSION_ID="lkdojiemjmekaibbklkoheninffafick"
-BROWSER_DIRS=(BraveSoftware/Brave-Browser chromium google-chrome vivaldi microsoft-edge)
-# Same flag files Omarchy uses for its own Chromium extensions.
-FLAG_FILES=(
-  chromium-flags.conf
-  chrome-flags.conf
-  google-chrome-flags.conf
-  brave-flags.conf
-  brave-beta-flags.conf
-  brave-nightly-flags.conf
-  brave-origin-flags.conf
-  brave-origin-beta-flags.conf
-  microsoft-edge-stable-flags.conf
-)
+# The browsers and flags files it looks at are listed in lib/browser_entries.py.
+ENTRIES="$PROJECT_DIR/lib/browser_entries.py"
 
 ENABLE=true
 TAKE_LINKS=false
@@ -138,9 +127,8 @@ install_packages() {
 }
 
 setup_complete() {
-  local name file dir current cli
+  local current
   missing_packages | grep -q . && return 1
-  cli="$(readlink -f "$PROJECT_DIR/bin/omanero")"
   in_place "$CLI_LINK" || return 1
   if desktop_path_ok; then
     # A launcher rendered by an older version pointed at ~/.local/bin/omanero.
@@ -151,17 +139,7 @@ setup_complete() {
     current="$(xdg-mime query default "$SCHEME" 2>/dev/null || true)"
     [[ -n $current ]] || return 1
   fi
-  for dir in "${BROWSER_DIRS[@]}"; do
-    [[ -d $CONFIG_HOME/$dir ]] || continue
-    file="$CONFIG_HOME/$dir/NativeMessagingHosts/$PLUGIN_ID.json"
-    [[ -f $file ]] && grep -qF -- "$cli" "$file" || return 1
-  done
-  for name in "${FLAG_FILES[@]}"; do
-    file="$CONFIG_HOME/$name"
-    [[ -f $file ]] || continue
-    grep -qF -- "$PROJECT_DIR/extension/x" "$file" || return 1
-  done
-  return 0
+  python3 -I "$ENTRIES" status "$CONFIG_HOME" "$PROJECT_DIR" "$PLUGIN_ID"
 }
 
 install_plugin_link() {
@@ -219,59 +197,14 @@ register_links() {
   fi
 }
 
-# Adds extension/x to the browser's --load-extension line, next to the ones
-# Omarchy loads the same way. The Chrome manifest stays one level below
-# extension/ so the marketplace sees a single plugin manifest at the repo root.
-# Takes effect the next time the browser starts.
-load_extension() {
-  local name file ext="$PROJECT_DIR/extension/x" old="$PROJECT_DIR/extension" loaded=false
-  for name in "${FLAG_FILES[@]}"; do
-    file="$CONFIG_HOME/$name"
-    [[ -f "$file" ]] || continue
-    loaded=true
-    if grep -qF -- "$ext" "$file"; then
-      continue
-    elif grep -qF -- "$old" "$file"; then
-      sed -i --follow-symlinks "s|$old|$ext|g" "$file"
-      log "extension path updated in $file"
-    elif grep -q '^--load-extension=' "$file"; then
-      sed -i --follow-symlinks "0,/^--load-extension=/s|^--load-extension=.*|&,$ext|" "$file"
-      log "extension added to $file"
-    else
-      printf -- '--load-extension=%s\n' "$ext" >> "$file"
-      log "extension added to $file"
-    fi
-  done
-  if $loaded; then
-    log "restart the browser once and the Tip controls appear on X"
-  else
-    log "no browser flags file found, so the Tip controls are not loaded"
-  fi
-}
-
-# Lets the browser extension in extension/ talk to the wallet tool.
+# Lets the browser extension in extension/x talk to the wallet tool: a native
+# messaging registration per browser and extension/x in the --load-extension
+# line of the flags files Omarchy uses for its own extensions. Only entries of
+# this checkout are written; anything else is left as it is. The Chrome
+# manifest stays one level below extension/ so the marketplace sees a single
+# plugin manifest at the repo root.
 register_browsers() {
-  local dir found=false
-  for dir in "${BROWSER_DIRS[@]}"; do
-    [[ -d "$CONFIG_HOME/$dir" ]] || continue
-    found=true
-    mkdir -p "$CONFIG_HOME/$dir/NativeMessagingHosts"
-    cat > "$CONFIG_HOME/$dir/NativeMessagingHosts/$PLUGIN_ID.json" <<JSON
-{
-  "name": "$PLUGIN_ID",
-  "description": "omanero wallet",
-  "path": "$PROJECT_DIR/bin/omanero",
-  "type": "stdio",
-  "allowed_origins": ["chrome-extension://$EXTENSION_ID/"]
-}
-JSON
-    log "browser link written for $dir"
-  done
-  if $found; then
-    load_extension
-  else
-    log "no Chromium-family browser found; tipping from X is not set up"
-  fi
+  python3 -I "$ENTRIES" install "$CONFIG_HOME" "$PROJECT_DIR" "$PLUGIN_ID" "$EXTENSION_ID"
 }
 
 already_enabled() {

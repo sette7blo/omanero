@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Reverses install.sh: locks the wallet, then removes the symlinks, the link
-# handler and the session state. Wallet files are never deleted.
+# Reverses install.sh: locks the wallet, then removes the browser entries, the
+# symlinks, the link handler and the session state. Only what belongs to this
+# checkout is removed. Wallet files are never deleted.
 
 set -euo pipefail
 
@@ -39,8 +40,14 @@ if command -v omarchy >/dev/null 2>&1; then
   omarchy plugin disable "$PLUGIN_ID" >/dev/null 2>&1 || true
 fi
 
-EXTENSION_DIR=""
-[[ -L "$PLUGIN_LINK" ]] && EXTENSION_DIR="$(readlink -f "$PLUGIN_LINK")/extension"
+# Before any link goes, so an entry written through the plugin link still
+# resolves to this checkout. Only this checkout's entries are removed.
+if command -v python3 >/dev/null 2>&1; then
+  python3 -I "$PROJECT_DIR/lib/browser_entries.py" uninstall "$CONFIG_HOME" "$PROJECT_DIR" "$PLUGIN_ID" \
+    || log "could not remove the browser entries"
+else
+  log "python3 not found; the browser entries were left"
+fi
 
 # The handler names omanero.desktop; it is ours only if that launcher was.
 OWN_DESKTOP=false
@@ -54,23 +61,6 @@ if $OWN_DESKTOP && [[ -f "$MIMEAPPS" ]] && grep -q '^x-scheme-handler/monero=oma
   sed -i '/^x-scheme-handler\/monero=omanero\.desktop;\?$/d' "$MIMEAPPS"
   log "monero: links no longer open in omanero"
 fi
-
-for dir in BraveSoftware/Brave-Browser chromium google-chrome vivaldi microsoft-edge; do
-  host="$CONFIG_HOME/$dir/NativeMessagingHosts/$PLUGIN_ID.json"
-  if [[ -f "$host" ]]; then
-    rm -f "$host"
-    log "removed the browser link for $dir"
-  fi
-done
-
-# The project dir is wherever the plugin link pointed; read before it went.
-for name in brave-flags.conf chromium-flags.conf; do
-  file="$CONFIG_HOME/$name"
-  if [[ -n "$EXTENSION_DIR" && -f "$file" ]] && grep -qF -- "$EXTENSION_DIR" "$file"; then
-    sed -i --follow-symlinks -e "s|,$EXTENSION_DIR||" -e "s|=$EXTENSION_DIR,|=|" -e "\|^--load-extension=$EXTENSION_DIR\$|d" "$file"
-    log "extension removed from $file; it is gone after the next browser restart"
-  fi
-done
 
 if [[ -d "$STATE_DIR" ]]; then
   rm -rf "$STATE_DIR"

@@ -6,6 +6,18 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The browser setup touches only what belongs to this plugin folder. The installer no
+  longer overwrites a native messaging registration (`NativeMessagingHosts/io.github.sette7blo.omanero.json`)
+  that points at another program, or one that is a symlink, and the uninstaller removes a
+  registration only when it points at this folder's `bin/omanero`.
+- The uninstaller removed the extension by the folder name of versions before 0.5
+  (`extension`), not `extension/x`: it could leave the extension loaded, or cut another
+  extension's path in the `--load-extension` list. It now removes exactly this folder's
+  entries, from every flags file the installer writes to (it only looked at two), keeps
+  every other entry, and drops a line left empty. The installer edits the list the same
+  way, entry by entry.
+
 ## [v0.5.5] - 2026-11-18
 
 ### Fixed
