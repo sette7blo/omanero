@@ -8,7 +8,6 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 PLUGIN_ID="io.github.sette7blo.omanero"
-TIMESTAMP="$(date +%Y%m%d%H%M%S)"
 
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -60,18 +59,27 @@ done
 
 log() { printf '[omanero] %s\n' "$*"; }
 
+# Never replaces or moves anything: when the path is already taken by something
+# that is not this plugin's link, it is left as it is. The plugin calls its own
+# bin/ directly, so it works without the link.
 link_path() {
   local source_path="$1"
   local target_path="$2"
   mkdir -p "$(dirname "$target_path")"
   if [[ -L "$target_path" && "$(readlink -f "$target_path")" == "$(readlink -f "$source_path")" ]]; then
-    return
+    return 0
   fi
   if [[ -e "$target_path" || -L "$target_path" ]]; then
-    mv "$target_path" "$target_path.bak.$TIMESTAMP"
-    log "backed up existing $target_path"
+    log "left $target_path as it is: something else is already there"
+    return 0
   fi
   ln -s "$source_path" "$target_path"
+  log "linked $target_path"
+}
+
+# Ours, or taken by something we leave alone: either way nothing to do.
+in_place() {
+  [[ -e "$1" || -L "$1" ]]
 }
 
 # Arch package names for the commands the wallet uses. A copy already on PATH,
@@ -127,9 +135,9 @@ setup_complete() {
   local name file dir current cli desktop
   missing_packages | grep -q . && return 1
   cli="$(readlink -f "$PROJECT_DIR/bin/omanero")"
-  [[ -L $CLI_LINK && "$(readlink -f "$CLI_LINK")" == "$cli" ]] || return 1
+  in_place "$CLI_LINK" || return 1
   desktop="$(readlink -f "$PROJECT_DIR/omanero.desktop")"
-  [[ -e $desktop && -L $DESKTOP_LINK && "$(readlink -f "$DESKTOP_LINK")" == "$desktop" ]] || return 1
+  [[ -e $desktop ]] && in_place "$DESKTOP_LINK" || return 1
   if command -v xdg-mime >/dev/null 2>&1; then
     current="$(xdg-mime query default "$SCHEME" 2>/dev/null || true)"
     [[ -n $current ]] || return 1
@@ -155,20 +163,17 @@ install_plugin_link() {
     return
   fi
   link_path "$PROJECT_DIR" "$PLUGIN_LINK"
-  log "linked plugin dir -> $PLUGIN_LINK"
 }
 
 install_cli() {
   chmod +x "$PROJECT_DIR/bin/omanero"
   link_path "$PROJECT_DIR/bin/omanero" "$CLI_LINK"
-  log "linked CLI -> $CLI_LINK"
 }
 
 install_desktop() {
   local rendered="$PROJECT_DIR/omanero.desktop"
   sed "s|@@OMANERO_CLI@@|$CLI_LINK|g" "$PROJECT_DIR/omanero.desktop.in" > "$rendered"
   link_path "$rendered" "$DESKTOP_LINK"
-  log "linked .desktop -> $DESKTOP_LINK"
   command -v update-desktop-database >/dev/null 2>&1 \
     && update-desktop-database "$DATA_HOME/applications" >/dev/null 2>&1 || true
 }
