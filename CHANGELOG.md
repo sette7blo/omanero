@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.4] - 2026-11-18
+
 ### Fixed
 - The launcher (`omanero.desktop`) runs the plugin's own `bin/omanero` instead of `~/.local/bin/omanero`,
   which may belong to another program when the installer left it alone. Launchers written by earlier versions are rewritten on the next load.
@@ -115,7 +117,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.3...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.4...HEAD
+[v0.5.4]: https://github.com/sette7blo/omanero/compare/v0.5.3...v0.5.4
 [v0.5.3]: https://github.com/sette7blo/omanero/compare/v0.5.2...v0.5.3
 [v0.5.2]: https://github.com/sette7blo/omanero/compare/v0.5.1...v0.5.2
 [v0.5.1]: https://github.com/sette7blo/omanero/compare/v0.5.0...v0.5.1
