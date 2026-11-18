@@ -6,6 +6,12 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The launcher (`omanero.desktop`) runs the plugin's own `bin/omanero` instead of `~/.local/bin/omanero`,
+  which may belong to another program when the installer left it alone. Launchers written by earlier versions are rewritten on the next load.
+  If the plugin folder's path holds characters a launcher cannot carry safely, no
+  launcher is made.
+
 ## [v0.5.3] - 2026-11-18
 
 ### Fixed
