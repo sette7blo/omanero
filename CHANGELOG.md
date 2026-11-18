@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.3] - 2026-11-18
+
 ### Fixed
 - The installer no longer moves an existing `~/.local/bin/omanero` or `omanero.desktop` aside
   to put its own link there. A path that is already taken is left as it is, and the
@@ -107,7 +109,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.2...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.3...HEAD
+[v0.5.3]: https://github.com/sette7blo/omanero/compare/v0.5.2...v0.5.3
 [v0.5.2]: https://github.com/sette7blo/omanero/compare/v0.5.1...v0.5.2
 [v0.5.1]: https://github.com/sette7blo/omanero/compare/v0.5.0...v0.5.1
 [v0.5.0]: https://github.com/sette7blo/omanero/compare/v0.4.0...v0.5.0

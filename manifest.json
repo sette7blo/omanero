@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.sette7blo.omanero",
   "name": "Omanero",
-  "version": "0.5.2",
+  "version": "0.5.3",
   "author": "sette7blo",
   "license": "MIT",
   "description": "A small hot Monero wallet in the Omarchy bar: create or restore from a seed, send and receive through a remote node, tip Monero addresses on X and GitHub, and tip plugin authors who publish an address.",
