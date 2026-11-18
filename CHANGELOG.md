@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.5] - 2026-11-18
+
 ### Fixed
 - `uninstall.sh` locks the wallet with the plugin's own `bin/omanero`, never with
   whatever is at `~/.local/bin/omanero`.
@@ -125,7 +127,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.5...HEAD
+[v0.5.5]: https://github.com/sette7blo/omanero/compare/v0.5.4...v0.5.5
 [v0.5.4]: https://github.com/sette7blo/omanero/compare/v0.5.3...v0.5.4
 [v0.5.3]: https://github.com/sette7blo/omanero/compare/v0.5.2...v0.5.3
 [v0.5.2]: https://github.com/sette7blo/omanero/compare/v0.5.1...v0.5.2
