@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.7] - 2026-11-19
+
 ### Changed
 - The marketplace listing has a preview picture (the Send tab, `preview.png` at the root)
   and a fuller description of what the wallet does.
@@ -145,7 +147,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.6...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.7...HEAD
+[v0.5.7]: https://github.com/sette7blo/omanero/compare/v0.5.6...v0.5.7
 [v0.5.6]: https://github.com/sette7blo/omanero/compare/v0.5.5...v0.5.6
 [v0.5.5]: https://github.com/sette7blo/omanero/compare/v0.5.4...v0.5.5
 [v0.5.4]: https://github.com/sette7blo/omanero/compare/v0.5.3...v0.5.4
