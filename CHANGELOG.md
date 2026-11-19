@@ -6,6 +6,10 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- The marketplace listing has a preview picture (the Send tab, `preview.png` at the root)
+  and a fuller description of what the wallet does.
+
 ## [v0.5.6] - 2026-11-18
 
 ### Fixed
