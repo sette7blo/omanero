@@ -22,10 +22,15 @@ Omarchy **Quattro** (v4.5+) with the plugin runtime.
 omarchy plugin add https://github.com/sette7blo/omanero.git --enable
 ```
 
-That is the only command. The first time the plugin loads, it installs
-`monero-wallet-rpc`, `python3`, `qrencode`, and `wl-clipboard` if any of them
-are missing. A terminal opens for your password when a package has to be
-installed. It also links the `omanero` command and a launcher, makes omanero
+**Setup needs your sudo password once.** The wallet runs on `monero-wallet-rpc`
+from the Arch `monero` package, which a stock Omarchy install does not have.
+The first time the plugin loads, a terminal opens and installs it, along with
+`python3`, `qrencode` and `wl-clipboard` if any of them are missing, through
+`omarchy pkg add` (or `sudo pacman -S`), and asks for your password. Until that
+is done the wallet cannot be used. You can also install them yourself first:
+`sudo pacman -S --needed monero python qrencode wl-clipboard`.
+
+The installer also links the `omanero` command and a launcher, makes omanero
 the handler for `monero:` links unless another wallet already is, and adds the
 browser extension for X and GitHub to the browser flags Omarchy already uses. Restart the browser
 once and the Tip controls appear.
