@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.sette7blo.omanero",
   "name": "Omanero",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "author": "sette7blo",
   "license": "MIT",
   "description": "A small hot Monero wallet in the Omarchy bar, with no local node: it talks to a public node you pick, and your keys stay in an encrypted wallet file on this machine. Create a wallet or restore one from its 25-word seed, send after a review of address, amount, fee and total, receive with Copy and a QR code, and see recent payments. A browser extension adds Tip buttons to Monero addresses on X and GitHub, and you can tip plugin authors who publish one. Unaudited: keep pocket money in it.",

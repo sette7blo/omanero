@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.5.8] - 2026-11-20
+
 ### Fixed
 - The wallet's text fields and the idle-lock number field stay read-only until they have
   keyboard focus, and closing the popup moves focus off them. Qt reads the clipboard on every
@@ -157,7 +159,8 @@ small amount first.
 - `omanero` command line tool and a launcher.
 - Receive tab can show the address as a QR code (`omanero qr` in a terminal).
 
-[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.7...HEAD
+[Unreleased]: https://github.com/sette7blo/omanero/compare/v0.5.8...HEAD
+[v0.5.8]: https://github.com/sette7blo/omanero/compare/v0.5.7...v0.5.8
 [v0.5.7]: https://github.com/sette7blo/omanero/compare/v0.5.6...v0.5.7
 [v0.5.6]: https://github.com/sette7blo/omanero/compare/v0.5.5...v0.5.6
 [v0.5.5]: https://github.com/sette7blo/omanero/compare/v0.5.4...v0.5.5
