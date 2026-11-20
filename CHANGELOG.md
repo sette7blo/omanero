@@ -6,6 +6,16 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- The wallet's text fields and the idle-lock number field stay read-only until they have
+  keyboard focus, and closing the popup moves focus off them. Qt reads the clipboard on every
+  clipboard change for each editable text field, visible or not, so a slow or oversized
+  clipboard offer from another app could stall the shell while the popup was hidden.
+
+### Changed
+- The README states up front that the first load asks for your sudo password once to install
+  `monero-wallet-rpc` and the other packages, and how to install them yourself.
+
 ## [v0.5.7] - 2026-11-19
 
 ### Changed

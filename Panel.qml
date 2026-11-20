@@ -243,6 +243,9 @@ Panel {
     function onOpenedChanged() {
       if (root.service) root.service.panelOpen = root.opened
       if (!root.opened) {
+        // No text field keeps focus, so none is editable while hidden; see
+        // GuardedTextField.
+        keyCatcher.forceActiveFocus()
         root.showSettings = false
         root.copied = false
         root.showQr = false
@@ -365,6 +368,7 @@ Panel {
     contentHeight: panel.fittedContentHeight(body.implicitHeight, Style.space(720))
 
     PanelKeyCatcher {
+      id: keyCatcher
       anchors.fill: parent
       blocked: root.typing
       onCloseRequested: {
@@ -483,7 +487,7 @@ Panel {
         Field {
           label: "Name for this wallet"
           visible: root.addingWallet
-          TextField {
+          GuardedTextField {
             id: nameField
             width: parent.width
             enabled: !root.busy
@@ -498,7 +502,7 @@ Panel {
         Field {
           label: "25-word seed"
           visible: root.setupMode === "restore"
-          TextField {
+          GuardedTextField {
             id: seedField
             width: parent.width
             enabled: !root.busy
@@ -513,7 +517,7 @@ Panel {
         Field {
           label: "Restore height"
           visible: root.setupMode === "restore"
-          TextField {
+          GuardedTextField {
             id: heightField
             width: parent.width
             enabled: !root.busy
@@ -527,7 +531,7 @@ Panel {
 
         Field {
           label: "Password"
-          TextField {
+          GuardedTextField {
             id: newPassField
             width: parent.width
             enabled: !root.busy
@@ -540,7 +544,7 @@ Panel {
 
         Field {
           label: "Repeat password"
-          TextField {
+          GuardedTextField {
             id: repeatPassField
             width: parent.width
             enabled: !root.busy
@@ -637,7 +641,7 @@ Panel {
 
         Field {
           label: Model.walletLabel(root.st) !== "" ? "Password for " + Model.walletLabel(root.st) : "Wallet password"
-          TextField {
+          GuardedTextField {
             id: unlockField
             width: parent.width
             enabled: !root.busy
@@ -724,7 +728,7 @@ Panel {
 
           Field {
             label: "Pay to"
-            TextField {
+            GuardedTextField {
               id: addressField
               width: parent.width
               placeholderText: "Monero address"
@@ -735,7 +739,7 @@ Panel {
 
           Field {
             label: "Amount in XMR"
-            TextField {
+            GuardedTextField {
               id: amountField
               width: parent.width
               placeholderText: "0.05"
@@ -1107,7 +1111,7 @@ Panel {
         Field {
           label: "Node"
           visible: root.draftNetwork === root.st.network
-          TextField {
+          GuardedTextField {
             id: nodeField
             width: parent.width
             placeholderText: root.st.nodes.length ? root.st.nodes[0] : "host:port"
@@ -1150,6 +1154,9 @@ Panel {
           accent: root.accent
           fontFamily: root.fontFamily
           onModified: function(v) { lockField.value = v }
+          // Same clipboard guard as GuardedTextField: the spin box's text
+          // input is editable only while it has focus.
+          field.editable: lockField.field.activeFocus
         }
 
         Note { text: "Changing the network or the node locks the wallet." }
