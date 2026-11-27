@@ -9,6 +9,8 @@ var PLUGIN_ID = "io.github.sette7blo.omanero"
 var MAX_TEXT = 120
 var MAX_ERROR = 300
 var MAX_HISTORY = 50
+var MAX_SUBADDRESSES = 50
+var MAX_LABEL = 40
 
 var ADDRESS_RE = /^[1-9A-HJ-NP-Za-km-z]{95}$|^[1-9A-HJ-NP-Za-km-z]{106}$/
 var AMOUNT_RE = /^\d{1,10}(\.\d{1,12})?$/
@@ -63,7 +65,7 @@ function emptyStatus() {
     autoLockMinutes: 30, walletExists: false, restoreHeight: 0,
     unlocked: false, busy: false, synced: false, nodeReachable: true,
     address: "", balance: "0", unlockedBalance: "0", height: 0, daemonHeight: 0,
-    request: null, page: [], wallet: "omanero", wallets: []
+    request: null, page: [], wallet: "omanero", wallets: [], subaddresses: []
   }
 }
 
@@ -111,6 +113,35 @@ function parseWallets(raw) {
   return items
 }
 
+// The wallet's subaddresses, index 1 up; index 0 is the main address.
+function parseSubaddresses(raw) {
+  var items = []
+  var seen = {}
+  var list = Array.isArray(raw) ? raw : []
+  for (var i = 0; i < list.length && items.length < MAX_SUBADDRESSES; i++) {
+    var item = list[i]
+    if (!item || typeof item !== "object") continue
+    var index = int(item.index)
+    var to = address(item.address)
+    if (index < 1 || !to || seen[index]) continue
+    seen[index] = true
+    items.push({ index: index, address: to, label: text(item.label, MAX_LABEL).trim() })
+  }
+  return items
+}
+
+function subaddressName(item) {
+  return item.label !== "" ? item.label : "Subaddress " + item.index
+}
+
+function subaddressAt(list, index) {
+  var items = list || []
+  for (var i = 0; i < items.length; i++) {
+    if (items[i].index === index) return items[i]
+  }
+  return null
+}
+
 function parseStatus(raw) {
   var data = parseJson(raw)
   if (!data || data.ok !== true) return null
@@ -133,7 +164,8 @@ function parseStatus(raw) {
     height: int(data.height), daemonHeight: int(data.daemonHeight),
     request: parseRequest(data.request), page: parsePage(data.page),
     wallet: typeof data.wallet === "string" && WALLET_NAME_RE.test(data.wallet) ? data.wallet : "omanero",
-    wallets: parseWallets(data.wallets)
+    wallets: parseWallets(data.wallets),
+    subaddresses: parseSubaddresses(data.subaddresses)
   }
 }
 
@@ -174,7 +206,8 @@ function parseTransfers(result) {
     rows.push({
       kind: kind, incoming: kind === "in" || kind === "pool",
       amount: amount(t.amount), fee: amount(t.fee),
-      timestamp: int(t.timestamp), confirmations: int(t.confirmations)
+      timestamp: int(t.timestamp), confirmations: int(t.confirmations),
+      subaddress: kind === "in" || kind === "pool" ? int(t.subaddress) : 0
     })
   }
   return rows
@@ -387,15 +420,22 @@ function timeAgo(seconds, nowMs) {
   return new Date(seconds * 1000).toISOString().slice(0, 10)
 }
 
-function transferRows(transfers, nowMs) {
+// An incoming payment to a subaddress says which one, by label when it has one.
+function transferRows(transfers, nowMs, subaddresses) {
   var rows = []
   var list = transfers || []
   for (var i = 0; i < list.length; i++) {
     var t = list[i]
     var waiting = t.kind === "pending" || t.kind === "pool"
+    var when = timeAgo(t.timestamp, nowMs)
+    var to = ""
+    if (t.incoming && t.subaddress > 0) {
+      var sub = subaddressAt(subaddresses, t.subaddress)
+      to = "To " + (sub ? subaddressName(sub) : "subaddress " + t.subaddress)
+    }
     rows.push({
       title: (t.incoming ? "+" : "-") + t.amount + " XMR",
-      subtitle: timeAgo(t.timestamp, nowMs),
+      subtitle: to !== "" && when !== "" ? to + ", " + when : (to || when),
       right: waiting ? "Waiting for a block"
         : (t.confirmations < 10 ? plural(t.confirmations, "confirmation", "confirmations") : "Confirmed"),
       incoming: t.incoming, waiting: waiting
@@ -414,6 +454,7 @@ if (typeof module !== "undefined" && module.exports) {
     syncLine: syncLine, level: level, tooltip: tooltip, heroMeta: heroMeta, networkLine: networkLine, walletLabel: walletLabel, heroTitle: heroTitle,
     tabForKey: tabForKey, nextTab: nextTab, walletNameProblem: walletNameProblem,
     passwordProblem: passwordProblem, seedProblem: seedProblem, sendProblem: sendProblem,
-    timeAgo: timeAgo, transferRows: transferRows
+    timeAgo: timeAgo, transferRows: transferRows,
+    parseSubaddresses: parseSubaddresses, subaddressName: subaddressName, subaddressAt: subaddressAt
   }
 }

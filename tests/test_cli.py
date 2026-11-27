@@ -376,6 +376,64 @@ class Wallet(unittest.TestCase):
         missing = self.run_cli("qr", env=dict(self.env, OMANERO_QRENCODE=self.tmp + "/nope"))
         self.assertIn("qrencode is not installed", missing["error"])
 
+    def test_subaddresses(self):
+        self.assertIn("locked", self.run_cli("address", "new", "x")["error"])
+        self.create()
+        self.assertEqual(self.run_cli("address")["subaddresses"], [])
+        tips = self.run_cli("address", "new", "--", "  X\ttips\n")
+        self.assertTrue(tips["ok"])
+        self.assertEqual((tips["index"], tips["label"]), (1, "X tips"))
+        self.assertTrue(tips["address"].startswith("8"))
+        self.assertTrue(os.path.exists(self.tmp + "/data/omanero/mainnet/stored.log"))
+        bare = self.run_cli("address", "new")
+        self.assertEqual((bare["index"], bare["label"]), (2, ""))
+        dashed = self.run_cli("address", "new", "--", "-" + "y" * 60)
+        self.assertEqual(dashed["label"], "-" + "y" * 39)
+
+        listed = self.run_cli("address")
+        self.assertEqual(listed["address"], MAIN)
+        self.assertEqual([(i["index"], i["label"]) for i in listed["subaddresses"]],
+                         [(1, "X tips"), (2, ""), (3, "-" + "y" * 39)])
+        self.assertEqual(self.run_cli("status")["subaddresses"], listed["subaddresses"])
+
+        rows = self.run_cli("history")["transfers"]
+        self.assertEqual([(r["kind"], r["subaddress"]) for r in rows], [("pool", 0), ("out", 0), ("in", 2)])
+
+        # The saved list is public and shown while locked, and comes back from
+        # the wallet on unlock if the file lost it.
+        self.run_cli("lock")
+        self.assertEqual(self.run_cli("address")["subaddresses"], listed["subaddresses"])
+        self.assertEqual(self.run_cli("status")["subaddresses"], listed["subaddresses"])
+        meta = self.tmp + "/data/omanero/mainnet/meta.json"
+        data = load(meta)
+        data["subaddresses"] = [{"index": 0, "address": MAIN, "label": "x"},
+                                {"index": 9, "address": "<b>no</b>", "label": "x"}]
+        dump(data, meta)
+        self.assertEqual(self.run_cli("status")["subaddresses"], [])
+        self.assertTrue(self.run_cli("unlock", data={"password": "hunter2"})["ok"])
+        self.assertEqual(self.run_cli("status")["subaddresses"], listed["subaddresses"])
+
+        stub = self.tmp + "/qrencode"
+        with open(stub, "w") as handle:
+            handle.write("#!/bin/sh\ncat > '%s/qr-input'\nfor i in $(seq 25); do "
+                         "printf '##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##\\n'; done\n" % self.tmp)
+        os.chmod(stub, 0o700)
+        env = dict(self.env, OMANERO_QRENCODE=stub)
+        got = self.run_cli("qr", tips["address"], env=env)
+        self.assertEqual(got["address"], tips["address"])
+        with open(self.tmp + "/qr-input") as handle:
+            self.assertEqual(handle.read(), "monero:" + tips["address"])
+        self.assertEqual(self.run_cli("qr", MAIN, env=env)["address"], MAIN)
+        self.assertIn("not one of this wallet", self.run_cli("qr", "8" + "D" * 94, env=env)["error"])
+
+    def test_subaddress_limit(self):
+        self.create()
+        for _ in range(M.MAX_SUBADDRESSES):
+            self.assertTrue(self.run_cli("address", "new")["ok"])
+        over = self.run_cli("address", "new")
+        self.assertIn("already has %d" % M.MAX_SUBADDRESSES, over["error"])
+        self.assertEqual(len(self.run_cli("address")["subaddresses"]), M.MAX_SUBADDRESSES)
+
     def browser(self, origin=None):
         return subprocess.Popen([CLI, origin or M.EXTENSION_ORIGIN], stdin=subprocess.PIPE,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, env=self.env)

@@ -45,7 +45,6 @@ RAWmakase; nobody ships it yet.
 ## Ideas, not scheduled
 
 - Polyseed (16-word) restore.
-- Subaddresses, one per tip jar.
 - "Send everything" (sweep).
 - Fiat value next to amounts.
 - Tor or a SOCKS proxy for the node connection.

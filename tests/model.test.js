@@ -255,3 +255,31 @@ test("form checks", () => {
     assert.match(M.sendProblem(MAIN, bad, "mainnet"), /dot for decimals/, bad)
   assert.equal(M.sendProblem(" " + MAIN + " ", " 0.05 ", "mainnet"), "")
 })
+
+test("subaddresses are re-checked and named", () => {
+  const SUB = "8" + "C".repeat(94)
+  const st = M.parseStatus(status({ subaddresses: [
+    { index: 1, address: SUB, label: "X\ttips" },
+    { index: 2, address: SUB.slice(0, 94) + "D", label: "" },
+    { index: 0, address: MAIN, label: "main" },
+    { index: 1, address: SUB, label: "twice" },
+    { index: 3, address: "<b>no</b>", label: "x" },
+    { index: 4, address: SUB, label: "y".repeat(80) },
+    null, "x"
+  ] }))
+  assert.deepEqual(st.subaddresses.map(s => [s.index, s.label]), [[1, "X tips"], [2, ""], [4, "y".repeat(40)]])
+  assert.deepEqual(st.subaddresses.map(M.subaddressName), ["X tips", "Subaddress 2", "y".repeat(40)])
+  assert.equal(M.subaddressAt(st.subaddresses, 2).address, SUB.slice(0, 94) + "D")
+  assert.equal(M.subaddressAt(st.subaddresses, 9), null)
+  assert.deepEqual(M.parseStatus(status({})).subaddresses, [])
+  assert.deepEqual(M.emptyStatus().subaddresses, [])
+
+  const transfers = M.parseTransfers({ transfers: [
+    { kind: "in", amount: "1", timestamp: NOW / 1000 - 7200, confirmations: 20, subaddress: 1 },
+    { kind: "pool", amount: "1", timestamp: 0, confirmations: 0, subaddress: 7 },
+    { kind: "out", amount: "1", timestamp: NOW / 1000 - 30, confirmations: 20, subaddress: 1 },
+    { kind: "in", amount: "1", timestamp: NOW / 1000 - 30, confirmations: 20, subaddress: 0 }
+  ] })
+  assert.deepEqual(M.transferRows(transfers, NOW, st.subaddresses).map(r => r.subtitle),
+    ["To X tips, 2 hours ago", "To subaddress 7", "just now", "just now"])
+})

@@ -23,6 +23,8 @@ Panel {
   property string formError: ""
   property bool copied: false
   property bool showQr: false
+  // 0 is the main address, otherwise the subaddress index shown on Receive.
+  property int receiveIndex: 0
   property var pickedTip: null
   // Adding another wallet next to the ones that exist.
   property bool addingWallet: false
@@ -52,7 +54,10 @@ Panel {
   readonly property var receipt: service ? service.receipt : null
   // Only a code for the address on screen is drawn; one left over from another
   // network or wallet is not.
-  readonly property var qr: service && service.qr && service.qr.address === st.address ? service.qr : null
+  readonly property var receivePick: receiveIndex > 0 ? Model.subaddressAt(st.subaddresses, receiveIndex) : null
+  readonly property string receiveAddress: receivePick ? receivePick.address : st.address
+  readonly property string walletKey: st.network + "/" + st.wallet
+  readonly property var qr: service && service.qr && service.qr.address === receiveAddress ? service.qr : null
 
   // loading | missing | seed | settings | setup | locked | wallet
   readonly property string view: {
@@ -68,7 +73,7 @@ Panel {
   readonly property bool typing: seedField.activeFocus || heightField.activeFocus
     || newPassField.activeFocus || repeatPassField.activeFocus || unlockField.activeFocus
     || addressField.activeFocus || amountField.activeFocus || nodeField.activeFocus
-    || lockField.field.activeFocus || nameField.activeFocus
+    || lockField.field.activeFocus || nameField.activeFocus || labelField.activeFocus
 
   // 0 to 3, stepped by a timer while a command runs.
   property int busyStep: 0
@@ -88,12 +93,32 @@ Panel {
     if (kind === "relay") return "Sending"
     if (kind === "config") return "Saving"
     if (kind === "forget") return "Removing the wallet"
+    if (kind === "address") return "Making a new address"
     return ""
   }
 
   readonly property string errorText: formError !== "" ? formError : (service ? service.error : "")
 
-  readonly property var historyRows: Model.transferRows(service ? service.transfers : [], Date.now())
+  readonly property var historyRows: Model.transferRows(service ? service.transfers : [], Date.now(), st.subaddresses)
+
+  function pickReceive(index) {
+    root.receiveIndex = index
+    root.copied = false
+  }
+
+  function loadQrIfShown() {
+    if (root.showQr && !root.qr && root.receiveAddress !== "" && root.service) root.service.loadQr(root.receiveAddress)
+  }
+
+  function makeAddress() {
+    if (root.busy || !root.service) return
+    clearMessages()
+    root.service.newAddress(labelField.text.trim())
+  }
+
+  onReceiveAddressChanged: loadQrIfShown()
+  // Another wallet has its own subaddresses; start again from its main address.
+  onWalletKeyChanged: root.receiveIndex = 0
 
   function clearMessages() {
     root.formError = ""
@@ -249,6 +274,7 @@ Panel {
         root.showSettings = false
         root.copied = false
         root.showQr = false
+        labelField.text = ""
         root.addingWallet = false
         root.confirmRemove = false
         root.pickingWallet = false
@@ -272,6 +298,9 @@ Panel {
       if (kind === "forget") { root.confirmRemove = false; if (ok) root.showSettings = false }
       if (kind === "relay" && ok) { addressField.text = ""; amountField.text = ""; root.pickedTip = null }
       if (kind === "config" && ok) root.showSettings = false
+      if (kind === "address" && ok) { labelField.text = ""; root.pickReceive(root.service.madeIndex) }
+      // A code asked for while another address was picked draws nothing; ask again.
+      if (kind === "qr" && ok) root.loadQrIfShown()
       if (kind === "dismiss") root.resetSend()
       root.loadHistoryIfShown()
     }
@@ -828,6 +857,32 @@ Panel {
           spacing: Style.spacing.xxl
           visible: root.tab === "receive"
 
+          Column {
+            width: parent.width
+            spacing: Style.spacing.md
+            visible: root.st.subaddresses.length > 0
+
+            FieldLabel { text: "Address to share" }
+            Flow {
+              width: parent.width
+              spacing: Style.spacing.md
+              PanelButton {
+                text: "Main"
+                selected: root.receivePick === null
+                onClicked: root.pickReceive(0)
+              }
+              Repeater {
+                model: root.st.subaddresses
+                PanelButton {
+                  required property var modelData
+                  text: Model.subaddressName(modelData)
+                  selected: root.receivePick !== null && root.receivePick.index === modelData.index
+                  onClicked: root.pickReceive(modelData.index)
+                }
+              }
+            }
+          }
+
           // Each module is a whole number of pixels so the code stays crisp.
           // The white card and its quiet zone are fixed, whatever the theme.
           Rectangle {
@@ -861,31 +916,60 @@ Panel {
             }
           }
 
-          ReviewLine { name: "Your address"; value: Model.groupedAddress(root.st.address) }
+          ReviewLine {
+            name: root.receivePick ? Model.subaddressName(root.receivePick) : "Your address"
+            value: Model.groupedAddress(root.receiveAddress)
+          }
           RowLayout {
             width: parent.width
             spacing: Style.spacing.lg
 
             PanelButton {
               text: root.copied ? "Copied" : "Copy address"
-              enabled: root.st.address !== ""
+              enabled: root.receiveAddress !== ""
               onClicked: {
                 // The address is re-checked by Model.address and passed as one argument.
-                Util.execArgv(["wl-copy", "--", root.st.address])
+                Util.execArgv(["wl-copy", "--", root.receiveAddress])
                 root.copied = true
               }
             }
             PanelButton {
               text: root.showQr ? "Hide QR code" : "Show QR code"
-              enabled: root.st.address !== ""
+              enabled: root.receiveAddress !== ""
               onClicked: {
                 root.showQr = !root.showQr
-                if (root.showQr && !root.qr && root.service) root.service.loadQr()
+                root.loadQrIfShown()
               }
             }
             Item { Layout.fillWidth: true }
           }
           Note { text: "Share this address to be paid. Incoming money shows up after the next block, about two minutes." }
+
+          Note {
+            visible: root.st.subaddresses.length >= 50
+            text: "This wallet has 50 subaddresses, the most omanero makes, so a restore from the seed always finds them."
+          }
+
+          Field {
+            label: "New subaddress"
+            visible: root.st.subaddresses.length < 50
+            GuardedTextField {
+              id: labelField
+              width: parent.width
+              enabled: !root.busy
+              opacity: enabled ? 1 : 0.45
+              maximumLength: 40
+              placeholderText: "Label, optional: X tips"
+              foreground: root.foreground
+              accent: root.accent
+              onAccepted: root.makeAddress()
+            }
+            PanelButton {
+              text: root.busy && root.service && root.service.busyKind === "address" ? root.busyLine : "New address"
+              onClicked: root.makeAddress()
+            }
+            Note { text: "A subaddress pays into the same balance. Someone who pays two of your addresses cannot tell they are the same wallet, so give each place its own." }
+          }
         }
 
         // -- History

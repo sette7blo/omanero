@@ -31,6 +31,8 @@ Item {
   property var transfers: []
   property bool transfersLoaded: false
   property var qr: null
+  // The index of the subaddress the last New address made, for the panel to pick it.
+  property int madeIndex: 0
   property var plugins: []
   property bool pluginsLoaded: false
 
@@ -103,7 +105,10 @@ Item {
   function clearSeed() { root.seedInfo = null }
   function clearError() { root.error = "" }
   function loadHistory() { enqueue("history", ["history"], null) }
-  function loadQr() { enqueue("qr", ["qr"], null) }
+  // Addresses and labels go after "--", so one that starts with a dash is not
+  // read as an option.
+  function loadQr(address) { enqueue("qr", ["qr", "--", String(address || "")], null) }
+  function newAddress(label) { enqueue("address", ["address", "new", "--", String(label || "")], null) }
   function loadPlugins() { enqueue("plugins", ["plugins"], null) }
   function dismissRequest() { enqueue("dismiss", ["dismiss"], null) }
   function saveConfig(changes) { enqueue("config", ["config", "apply"], { set: changes }) }
@@ -149,6 +154,11 @@ Item {
     } else if (kind === "history") {
       root.transfers = Model.parseTransfers(res)
       root.transfersLoaded = true
+    } else if (kind === "address") {
+      var made = Model.parseSubaddresses([res])
+      root.madeIndex = made.length ? made[0].index : 0
+      // Shown at once rather than after the next status run.
+      root.status = Object.assign({}, root.status, { subaddresses: Model.parseSubaddresses(res.subaddresses) })
     } else if (kind === "qr") {
       root.qr = Model.parseQr(res)
     } else if (kind === "plugins") {

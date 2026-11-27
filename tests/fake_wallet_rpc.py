@@ -13,6 +13,21 @@ import threading
 
 ADDRESS = {"mainnet": "4" + "A" * 94, "stagenet": "5" + "B" * 94}
 SEED = " ".join(["abbey"] * 25)
+BASE58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def subaddress(index):
+    return {"mainnet": "8", "stagenet": "7"}[network()] + "C" * 92 + BASE58[index // 58] + BASE58[index % 58]
+
+
+def read_wallet():
+    with open(wallet_file(State.opened)) as handle:
+        return json.load(handle)
+
+
+def write_wallet(data):
+    with open(wallet_file(State.opened), "w") as handle:
+        json.dump(data, handle)
 
 
 def md5(text):
@@ -82,7 +97,23 @@ def call(method, params):
         State.opened = None
         return {}
     if method == "get_address":
-        return {"address": ADDRESS[network()], "addresses": []}
+        labels = read_wallet().get("subs", [])
+        addresses = [{"address_index": 0, "address": ADDRESS[network()], "label": "Primary account", "used": True}]
+        addresses += [{"address_index": i + 1, "address": subaddress(i + 1), "label": label, "used": False}
+                      for i, label in enumerate(labels)]
+        return {"address": ADDRESS[network()], "addresses": addresses}
+    if method == "create_address":
+        if params.get("account_index") != 0:
+            return fail(-1, "only account 0 in the test wallet")
+        data = read_wallet()
+        data["subs"] = data.get("subs", []) + [params.get("label", "")]
+        write_wallet(data)
+        index = len(data["subs"])
+        return {"address": subaddress(index), "address_index": index}
+    if method == "store":
+        with open(os.path.join(State.conf["wallet-dir"], "stored.log"), "a") as handle:
+            handle.write("store\n")
+        return {}
     if method == "get_balance":
         return {"balance": 2500000000000, "unlocked_balance": 2000000000000}
     if method == "get_height":
@@ -92,7 +123,7 @@ def call(method, params):
             return {"key": json.load(handle)["seed"]}
     if method == "validate_address":
         address = params["address"]
-        ok = bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{95}$", address)) and address[0] == ADDRESS[network()][0]
+        ok = bool(re.match(r"^[1-9A-HJ-NP-Za-km-z]{95}$", address)) and address[0] in (ADDRESS[network()][0], subaddress(1)[0])
         return {"valid": ok, "nettype": network(), "integrated": False, "subaddress": False}
     if method == "transfer":
         if not params.get("do_not_relay") or not params.get("get_tx_metadata"):
@@ -108,7 +139,8 @@ def call(method, params):
         return {"tx_hash": "ab" * 32}
     if method == "get_transfers":
         return {
-            "in": [{"txid": "11" * 32, "amount": 1500000000000, "fee": 0, "timestamp": 1700000000, "confirmations": 40}],
+            "in": [{"txid": "11" * 32, "amount": 1500000000000, "fee": 0, "timestamp": 1700000000, "confirmations": 40,
+                    "subaddr_index": {"major": 0, "minor": 2}}],
             "out": [{"txid": "22" * 32, "amount": 250000000000, "fee": 30000000, "timestamp": 1700005000, "confirmations": 12}],
             "pool": [{"txid": "<b>not hex</b>", "amount": 1, "fee": 0, "timestamp": 1700009000, "confirmations": 0}],
         }

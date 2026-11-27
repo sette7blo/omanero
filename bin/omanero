@@ -70,6 +70,10 @@ DAEMON_HEIGHT_TTL = 30
 BLOCKS_PER_DAY = 720
 MAX_TEXT = 120
 MAX_HISTORY = 50
+# The wallet looks 200 subaddresses ahead when it scans, so a wallet restored
+# from its seed always finds payments to all of these.
+MAX_SUBADDRESSES = 50
+MAX_LABEL = 40
 MAX_PAGE_ITEMS = 5
 MAX_PLUGINS = 100
 MAX_MANIFEST_BYTES = 256 * 1024
@@ -919,6 +923,7 @@ def base_status(cfg):
         "wallets": list_wallets(cfg),
         "restoreHeight": clamp_int(meta.get("restoreHeight"), 0, 10 ** 9, 0),
         "knownAddress": str(meta.get("address") or ""),
+        "subaddresses": clean_subaddresses(meta.get("subaddresses"), cfg["network"]),
         "unlocked": False, "busy": False, "synced": False,
         "address": "", "balance": "0", "unlockedBalance": "0",
         "height": 0, "daemonHeight": 0, "nodeReachable": True,
@@ -997,6 +1002,59 @@ def creation_height(cfg):
 def write_meta(cfg, restore_height, address):
     write_private(meta_path(cfg), json.dumps({
         "restoreHeight": restore_height, "address": address, "createdAt": int(time.time())}))
+
+
+def clean_label(value):
+    return clean_text(value)[:MAX_LABEL].strip()
+
+
+def clean_subaddresses(raw, network):
+    out = []
+    seen = set()
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict) or len(out) >= MAX_SUBADDRESSES:
+            continue
+        index = clamp_int(item.get("index"), 0, 2 ** 31, 0)
+        try:
+            address = check_address(item.get("address"), network)
+        except Fail:
+            continue
+        if index < 1 or index in seen:
+            continue
+        seen.add(index)
+        out.append({"index": index, "address": address, "label": clean_label(item.get("label"))})
+    out.sort(key=lambda item: item["index"])
+    return out
+
+
+def saved_subaddresses(cfg):
+    meta = read_json(meta_path(cfg), {}) or {}
+    return clean_subaddresses(meta.get("subaddresses"), cfg["network"])
+
+
+def wallet_subaddresses(cfg, timeout=10):
+    # Account 0 only; index 0 is the main address.
+    result = wallet_rpc("get_address", {"account_index": 0}, timeout=timeout)
+    raw = [{"index": item.get("address_index"), "address": item.get("address"), "label": item.get("label")}
+           for item in (result.get("addresses") or [])[:MAX_SUBADDRESSES + 1] if isinstance(item, dict)]
+    return clean_subaddresses(raw, cfg["network"])
+
+
+def save_subaddresses(cfg, items):
+    # The list is public, like the main address, so the Receive tab can show
+    # it while the wallet is locked.
+    meta = read_json(meta_path(cfg), {}) or {}
+    meta["subaddresses"] = items
+    write_private(meta_path(cfg), json.dumps(meta))
+
+
+def sync_subaddresses(cfg, timeout=10):
+    try:
+        items = wallet_subaddresses(cfg, timeout)
+    except (RpcDown, RpcError):
+        return saved_subaddresses(cfg)
+    save_subaddresses(cfg, items)
+    return items
 
 
 def refuse_existing(cfg):
@@ -1091,6 +1149,8 @@ def cmd_unlock(cfg, data):
     except RpcDown as error:
         stop_rpc()
         raise Fail("Could not open the wallet: %s" % error)
+    # Short: a wallet that starts scanning right away keeps the saved list.
+    sync_subaddresses(cfg, 5)
     touch_session()
     return {}
 
@@ -1167,6 +1227,7 @@ def cmd_history(cfg, data):
             if not isinstance(item, dict):
                 continue
             txid = str(item.get("txid", "")).lower()
+            sub = item.get("subaddr_index") if kind in ("in", "pool") else None
             rows.append({
                 "kind": kind,
                 "incoming": kind in ("in", "pool"),
@@ -1175,9 +1236,47 @@ def cmd_history(cfg, data):
                 "timestamp": clamp_int(item.get("timestamp"), 0, 2 ** 40, 0),
                 "confirmations": clamp_int(item.get("confirmations"), 0, 10 ** 9, 0),
                 "txid": txid if HEX64_RE.match(txid) else "",
+                # Which of this wallet's addresses an incoming payment went to; 0 is the main one.
+                "subaddress": clamp_int(sub.get("minor"), 0, 2 ** 31, 0) if isinstance(sub, dict) else 0,
             })
     rows.sort(key=lambda row: row["timestamp"], reverse=True)
     return {"transfers": rows[:MAX_HISTORY]}
+
+
+def wallet_open():
+    if not rpc_pid():
+        return False
+    try:
+        return open_address() != ""
+    except RpcDown:
+        return False
+
+
+def cmd_address(cfg, data):
+    if data.get("action") != "new":
+        items = sync_subaddresses(cfg) if wallet_open() else saved_subaddresses(cfg)
+        return {"address": str((read_json(meta_path(cfg), {}) or {}).get("address") or ""), "subaddresses": items}
+    require_unlocked()
+    label = clean_label(data.get("label"))
+    try:
+        if len(wallet_subaddresses(cfg)) >= MAX_SUBADDRESSES:
+            raise Fail("This wallet already has %d subaddresses, the most omanero makes." % MAX_SUBADDRESSES)
+        made = wallet_rpc("create_address", {"account_index": 0, "label": label}, timeout=30)
+    except RpcError as error:
+        raise Fail(clean_text(error.message) or "The wallet could not make a subaddress")
+    except RpcDown:
+        raise Fail("The wallet is busy syncing. Try again in a moment.")
+    address = check_address(made.get("address"), cfg["network"])
+    index = clamp_int(made.get("address_index"), 0, 2 ** 31, 0)
+    # Saved now, not at lock: after a crash the wallet would hand out the same
+    # index again, and its label would be gone.
+    try:
+        wallet_rpc("store", timeout=60)
+    except (RpcDown, RpcError):
+        pass
+    items = sync_subaddresses(cfg)
+    touch_session()
+    return {"index": index, "address": address, "label": label, "subaddresses": items}
 
 
 def write_watched(name, value):
@@ -1420,14 +1519,18 @@ def appstream_apps(cfg):
     return found
 
 
-def cmd_qr(cfg):
-    # The address is public and already in meta.json, so this needs neither the
-    # wallet service nor the lock.
+def cmd_qr(cfg, wanted=""):
+    # The addresses are public and already in meta.json, so this needs neither
+    # the wallet service nor the lock.
     address = str((read_json(meta_path(cfg), {}) or {}).get("address") or "")
     try:
         address = check_address(address, cfg["network"])
     except Fail:
         raise Fail("No wallet address yet. Create or restore a wallet first.")
+    if wanted and wanted != address:
+        if wanted not in [item["address"] for item in saved_subaddresses(cfg)]:
+            raise Fail("That is not one of this wallet's addresses")
+        address = wanted
     tool = os.environ.get("OMANERO_QRENCODE") or shutil.which("qrencode") or ""
     try:
         proc = subprocess.run([tool, "--type", "ASCII", "--level", "M", "--margin", "4", "--output", "-"],
@@ -1515,7 +1618,7 @@ LOCKED_COMMANDS = {
     "create": cmd_create, "restore": cmd_restore, "unlock": cmd_unlock, "lock": cmd_lock,
     "preview": cmd_preview, "relay": cmd_relay, "history": cmd_history, "uri": cmd_uri,
     "dismiss": cmd_dismiss, "config": cmd_config, "seed": cmd_seed, "open": cmd_open,
-    "wallets": cmd_wallets, "forget": cmd_forget,
+    "wallets": cmd_wallets, "forget": cmd_forget, "address": cmd_address,
 }
 
 
@@ -1568,6 +1671,8 @@ def gather(args):
         return {"address": args.address, "amount": args.amount}
     if command == "relay":
         return {"id": args.id}
+    if command == "address":
+        return {"action": args.action, "label": args.label}
     if command in ("uri", "open"):
         return {"uri": args.uri}
     if command == "config":
@@ -1612,7 +1717,7 @@ def run(args):
     if command == "send":
         return interactive_send(cfg, args)
     if command == "qr":
-        return cmd_qr(cfg)
+        return cmd_qr(cfg, str(args.address or "").strip())
     if command == "plugins":
         return cmd_plugins(cfg)
     data = gather(args)
@@ -1658,9 +1763,23 @@ def print_human(command, result):
         print("Node:      %s (%s)" % (result["node"], result["network"]))
         return
     if command == "history":
+        labels = {item["index"]: item["label"] or "subaddress %d" % item["index"]
+                  for item in saved_subaddresses(load_config())}
         for row in result["transfers"]:
             when = datetime.datetime.fromtimestamp(row["timestamp"]).strftime("%Y-%m-%d %H:%M")
-            print("%s  %s%s XMR  %s" % (when, "+" if row["incoming"] else "-", row["amount"], row["kind"]))
+            to = ""
+            if row["incoming"] and row["subaddress"]:
+                to = "  to " + labels.get(row["subaddress"], "subaddress %d" % row["subaddress"])
+            print("%s  %s%s XMR  %s%s" % (when, "+" if row["incoming"] else "-", row["amount"], row["kind"], to))
+        return
+    if command == "address":
+        if "index" in result:
+            print("New subaddress %d%s" % (result["index"], ": " + result["label"] if result["label"] else ""))
+            print(result["address"])
+            return
+        print("main  %s" % result["address"])
+        for item in result["subaddresses"]:
+            print("%-4d  %s%s" % (item["index"], item["address"], "  " + item["label"] if item["label"] else ""))
         return
     if command == "wallets":
         for item in result["wallets"]:
@@ -1727,7 +1846,11 @@ def build_parser():
     relay = sub.add_parser("relay", help=argparse.SUPPRESS)
     relay.add_argument("--id", default="")
     sub.add_parser("history", help="recent transfers")
-    sub.add_parser("qr", help="show the wallet address as a QR code")
+    qr = sub.add_parser("qr", help="show the wallet address, or one of its subaddresses, as a QR code")
+    qr.add_argument("address", nargs="?", default="")
+    address = sub.add_parser("address", help="list the subaddresses, or make a new one with an optional label")
+    address.add_argument("action", nargs="?", choices=["list", "new"], default="list")
+    address.add_argument("label", nargs="?", default="")
     sub.add_parser("plugins", help="installed plugins and apps whose author can be tipped")
     sub.add_parser("seed", help="show the seed of the unlocked wallet")
     uri = sub.add_parser("uri", help="open a monero: link in the panel")
