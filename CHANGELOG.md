@@ -6,6 +6,13 @@ project uses [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- Subaddresses: **New address** on the Receive tab makes one, with an optional label, and
+  the address picker above it copies or shows the QR code of any of them. Up to 50 per
+  wallet, so a restore from the seed always finds payments to them. History says which
+  subaddress a payment went to. On the command line: `omanero address` and
+  `omanero address new [label]`; `omanero qr` takes one of the wallet's addresses.
+
 ## [v0.5.8] - 2026-11-20
 
 ### Fixed

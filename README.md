@@ -55,8 +55,8 @@ Click the Monero icon on the bar.
 | Restore from seed | Enter the 25 words, a restore height (a block number, or a date like `2024-03-15`) and a new password. The wallet then scans from that height, which can take a while for an old wallet. |
 | Unlock | Type the password. The wallet locks itself again after 30 idle minutes (changeable, 0 turns it off). |
 | Send | Enter an address and an amount, press Review, read the address, amount, fee and total, then Send. Nothing leaves the wallet before that last press. |
-| Receive | Shows your address with a Copy button. |
-| History | Recent payments in and out. |
+| Receive | Shows your address with Copy and a QR code. **New address** makes a subaddress, with a label if you want one. |
+| History | Recent payments in and out, and which subaddress a payment went to. |
 
 ![Send: an address, an amount, and Review before anything is sent](docs/send.png)
 
@@ -101,6 +101,25 @@ Settings has a **Wallet** section:
   money again you need its 25-word seed, so write that down first.
 
 One wallet is open at a time. Mainnet and stagenet each have their own set.
+
+### Subaddresses
+
+Sharing one address everywhere lets anyone who sees it in two places tie the
+payments together. A subaddress is another address of the same wallet: money
+sent to it lands in the same balance, and someone who pays two of your
+addresses cannot tell they belong to one wallet. Give each place its own, for
+example one for X and one for GitHub.
+
+On the Receive tab, type a label (optional, up to 40 characters) and press
+**New address**. Pick **Main** or a subaddress above the address to copy it or
+show its QR code. The list is kept next to the wallet, so it shows while the
+wallet is locked too. History says which subaddress a payment went to.
+
+omanero makes up to 50 per wallet. Subaddresses come from the seed, and a
+wallet restored from it looks 200 ahead, so payments to all of them are always
+found. The labels are not part of the seed: after a restore, the same
+subaddresses come back in the same order as you make them again, without
+labels.
 
 ### Restore height
 
@@ -333,7 +352,9 @@ omanero use tips               # switch
 omanero forget tips            # take it out; the files are moved aside
 omanero send <address> <amount>   # shows the fee and asks before sending
 omanero history
-omanero qr                     # the wallet address as a QR code
+omanero qr [address]           # the wallet address, or one of its subaddresses, as a QR code
+omanero address                # the main address and the subaddresses
+omanero address new "X tips"   # a new subaddress; the label is optional
 omanero plugins                # installed plugins and apps whose author can be tipped
 omanero seed                   # show the seed of the unlocked wallet
 omanero config                 # show settings
