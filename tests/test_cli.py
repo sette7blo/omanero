@@ -412,6 +412,10 @@ class Wallet(unittest.TestCase):
         self.assertEqual(self.run_cli("status")["subaddresses"], [])
         self.assertTrue(self.run_cli("unlock", data={"password": "hunter2"})["ok"])
         self.assertEqual(self.run_cli("status")["subaddresses"], listed["subaddresses"])
+        # A status run while unlocked puts it back too.
+        dump(dict(load(meta), subaddresses=[]), meta)
+        self.assertEqual(self.run_cli("status")["subaddresses"], listed["subaddresses"])
+        self.assertEqual(load(meta)["subaddresses"], listed["subaddresses"])
 
         stub = self.tmp + "/qrencode"
         with open(stub, "w") as handle:

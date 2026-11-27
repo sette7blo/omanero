@@ -944,10 +944,20 @@ def status(cfg, active=False):
         session["lastActivity"] = now
 
     try:
-        address = open_address()
+        try:
+            listing = wallet_rpc("get_address", {"account_index": 0}, timeout=3)
+        except RpcError:
+            listing = {}
+        address = str(listing.get("address", ""))
         if not address:
             stop_rpc()
             return out
+        # The same answer lists the subaddresses; the saved copy catches up
+        # here when the wallet was too busy to answer at unlock.
+        subaddresses = wallet_subaddresses(cfg, result=listing)
+        if subaddresses != out["subaddresses"]:
+            save_subaddresses(cfg, subaddresses)
+            out["subaddresses"] = subaddresses
         balance = wallet_rpc("get_balance", {"account_index": 0}, timeout=5)
         height = clamp_int(wallet_rpc("get_height", timeout=5).get("height"), 0, 10 ** 9, 0)
     except RpcDown as error:
@@ -1032,9 +1042,10 @@ def saved_subaddresses(cfg):
     return clean_subaddresses(meta.get("subaddresses"), cfg["network"])
 
 
-def wallet_subaddresses(cfg, timeout=10):
+def wallet_subaddresses(cfg, timeout=10, result=None):
     # Account 0 only; index 0 is the main address.
-    result = wallet_rpc("get_address", {"account_index": 0}, timeout=timeout)
+    if result is None:
+        result = wallet_rpc("get_address", {"account_index": 0}, timeout=timeout)
     raw = [{"index": item.get("address_index"), "address": item.get("address"), "label": item.get("label")}
            for item in (result.get("addresses") or [])[:MAX_SUBADDRESSES + 1] if isinstance(item, dict)]
     return clean_subaddresses(raw, cfg["network"])
